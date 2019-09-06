@@ -10,16 +10,22 @@
 
 
 ## Then install the following R-packages (you can run these lines in R):
+# Tues
+install.packages('rjags')
+install.packages('R2jags')
+install.packages('jagsUI')
+install.packages('mvtnorm')
+install.packages('rworldmap')
+install.packages('raster')
+install.packages('readxl')
+install.packages('geoR')
+install.packages('gstat')
+install.packages('ggplot2')
+# Weds
+install.packages('rstanarm')
 install.packages('BayesianTools')
 install.packages('coda')
 install.packages('emdbook')
-install.packages('geoR')
-install.packages('ggmap')
-install.packages('ggplot2')
+# Thurs
 install.packages('inlabru')
-install.packages('jagsUI')
-install.packages('mvtnorm')
-install.packages('rjags')
-install.packages('rstanarm')
-install.packages('R2jags')
 install.packages('shiny')

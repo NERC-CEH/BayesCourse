@@ -1,0 +1,124 @@
+---
+title: "Literate programming using R Markdown"
+author: "MvO"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+  pdf_document:
+    number_sections: yes
+    toc: yes
+  word_document: default
+subtitle: With code examples in R
+---
+
+# Introduction
+This document shows some very basic examples of literate programming using R Markdown.
+
+## Literate programming
+Literate programming = combining *live code* and *text* in one file. Special software is needed to "weave" such a file into a nicely readable document that combines the code-output with the text. The only weaving-software that we discuss here is **knitr**, which comes with **RStudio** (the 'integrated development environment', or IDE, for **R**). Use of RStudio is highly recommended: it helps not only with literate programming but also with using and testing any R-code.
+
+So in our literate prgramming we combine code-chunks written in R with text. To allow knitr to do its magic (i.e. create pretty documents with nice layout etc.), we should follow some rules when writing the text-bits. We choose the rules of the simplest mark-up language, **markdown**. RStudio understands markdown documents.
+
+Once we have created our code-text mixture, i.e. our markdown-file (with extension .Rmd), we want to use knitr to weave it into something nice. RStudio gives us the options of knitr-export to three different file-types: *HTML*, *pdf*, *Word*.
+
+# Using knitr
+
+## Setting global options
+The following global options change nothing (they are the defaults):
+```{r setoptions,echo=TRUE}
+knitr::opts_chunk$set(echo=TRUE,results="asis")
+```
+
+If you only want the results from R-code-chunks to be shown in the final document, then choose echo=FALSE. Many such options can be set. One important one is cache=TRUE which stores the results of calculations in separate files, and loads them when you re-weave the file. That is useful when you have finished your work on the code-chunks but are busy editing the text-bits, because then the HTML-, pdf- or Word-document are created faster.
+
+## Fonts: italics and bold
+You can write *text in italics* and **in boldface**.
+
+## Quotes
+A quote is written by starting a line with the > symbol:
+
+> Modellers never write proper documentation!
+
+## Link to a webpage
+A link to a file or website looks like this: [Helophilus pendulus](https://picasaweb.google.com/109778459922622855546/AYearInNorway#5900928803315985026).
+
+## Math equations
+Let's write some mathematics:
+
+> $\alpha^2+\beta^2=\gamma^2$.
+
+So the "LaTeX-way" to write variable names with a subscript or superscript is: $x_2$ and $x^2$. But there is also a markdown way for the superscript: x^2^.
+
+Let's write some more:
+
+"If r equals `r r <- 2 ; 2`, then $r^2$ is `r r^2`. And $\pi*r^2$ is `r pi*r^2`."
+
+Finally, here is a complicated equation:
+$$ J_\alpha(x) = \sum\limits_{m=0}^\infty \frac{(-1)^m}{m! \, \Gamma(m + \alpha + 1)}{\left({\frac{x}{2}}\right)}^{2 m + \alpha} $$
+
+## Examples of code-chunks
+
+Now we'll show some code-chunks. Each of them consists of a few lines of code in R. RStudio has a drop-down menu that allows you to easily navigate between the code-chunks in your file. The drop-down menu also shows the keyboard shortcuts. Two very useful ones are *Ctrl-Alt-C* for running the current code-chunk, and *Ctrl-Alt-R* for running all of them. If you run code-chunks in such a way, their output will go to the regular places, i.e. the console and the Plots-window. So that is different from weaving the file using knitr, which makes the outputs part of your new external HTML-, pdf- or Word-document. So using these Ctrl-Alt commands is good for testing your code before weaving.
+
+### R-code 1
+Let's have some text first. OK, now the code:
+```{r code example 1, echo=TRUE}
+set.seed(1)
+x <- rnorm(100)
+mean(x)
+```
+
+### R-code 2
+This time we use the same R-code but following option: results="hide":
+
+```{r simulation 2, echo=TRUE, results="hide"}
+set.seed(1)
+x <- rnorm(100)
+mean(x)
+```
+
+That second bit of code was evaluated, but no results were shown in the final document.
+
+### R-code 3: inline
+R-code does not have to be placed in code-chunks beginning and ending in ```. Code can also be used inline, as part of a regular text-sentence. In this example we do first use a code-chunk, but just to calculate the variables 'time' and 'rand'. Thereafter the values of those variables can be included inline.
+
+```{r calculating time and a random number,echo=TRUE}
+time <- format(Sys.time(), "%a %b %d %X %Y")
+rand <- rnorm(1)
+```
+
+The time is now `r time`, and our random number of the day is: `r rand`.
+Another example of an inline calculation is this: pi^2 is equal to `r pi^2`.
+
+### R-code 4: Creating plots
+Let's first get some numbers to plot:
+
+```{r somenumbers,echo=TRUE}
+x <- rnorm(50); y <- x + rnorm(50,sd=0.3)
+```
+
+Now we create a scatterplot of those numbers:
+```{r scatterplot 1, fig.height=4}
+par(mar=c(5,4,1,1),las=1)
+plot(x,y,main="Some random numbers")
+```
+
+Note: if we export to an HTML-file, that plot will embedded! That is good (stand-alone file) and bad (big file).
+
+### R-code 5: Results from statistical analysis
+We'll get some data that come with R, and fit a linear model:
+
+```{r fitmodel}
+library(datasets)
+data(airquality)
+fit <- lm(Ozone ~ Wind + Temp + Solar.R, data=airquality)
+knitr::kable(anova(fit))
+```
+
+## Further reading
+* [Karl Broman: "knitr in a knutshell: a minimal tutorial"](http://kbroman.org/knitr_knutshell/)
+* [RStudio website: "R Markdown - Dynamic Documents for R"](http://rmarkdown.rstudio.com/)
+* [Richard Layton: "Happy collaboration with Rmd to docx"](http://rmarkdown.rstudio.com/articles_docx.html)
+* [Dean Attali: "Knitr's best hidden gem: spin"](http://deanattali.com/2015/03/24/knitrs-best-hidden-gem-spin/)

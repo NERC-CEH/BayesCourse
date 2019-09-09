@@ -2,7 +2,7 @@
 title: 'Bayesian Methods for Ecological and Environmental Modelling'
 subtitle: 'Spatial Data: Practical 1'
 author: "Peter Levy"
-date: "`r Sys.Date()`"
+date: "10 September 2019"
 output:
   rmarkdown::html_document:
 #  rmarkdown::pdf_document:
@@ -17,31 +17,16 @@ bibliography: spatial_Practical1.bib
 library(rmarkdown)
 system.time(render("spatial_Practical1.Rmd", output_file = "spatial_Practical1.html"))
 system.time(render("spatial_Practical1.Rmd", output_file = "spatial_Practical1.pdf"))
-system.time(render("spatial_Practical1.Rmd", output_file = "spatial_Practical1.docx"))
 knitr::purl("spatial_Practical1.Rmd")
-tools::texi2pdf("spatial_Practical1.tex")
-shell.exec("spatial_Practical1.pdf")
-#qsub -q verylong que_render -m abe -M plevy@ceh.ac.uk
 ```
 <!--- } -->
 
 <!--- { startup -->
-```{r startup, eval=TRUE, echo=FALSE, include=FALSE}
+```{r startup, eval=TRUE, echo=TRUE, include=FALSE}
 rm(list=ls(all=TRUE))
-#install.packages("rworldmap")
-# library(KMfootprint)
-# library(rasterVis)
-# library(gridExtra)
-# library(tidyverse)
-# library(twinspanR)
-# library(nnet)
-# library(vegan)
-# library(cluster)
-# library(cluster)
 library(ggplot2)
 library(rworldmap)
 library(raster)
-library(readxl)
 library(geoR)
 set.seed(448)
 
@@ -74,10 +59,7 @@ We now consider two examples of of applying Bayesian kriging to real spatial est
 We use the the `geoR` package in R to do this.  This allows us to use (hopefully) familar R function syntax, and saves us having to write out the whole geostatistical model in JAGS.
 
 # Case study 1: Spread of Agriculture in the Neolithic Period
-Around 8000 years ago, human society in the Middle East made the transition from hunter-gathering to growing domesticated crops - the start of agriculture.
-Radiocarbon data of agricultural artefacts can give an estimate of the earliest date for agriculture at archaeological sites.
-Isern et al. [-@Isern2012] collate such a data set, and infer the pattern in the spread of agriculture in Neolithic times, from the Middle East across Western Europe.
-Here, we reanalyse this data, using Bayesian kriging to provide estimates of uncertainty.
+Around 8000 years ago, human society made the transition from hunter-gathering to growing domesticated crops - the start of agriculture. Radiocarbon data from agricultural artefacts can give an estimate of the earliest date for agriculture at archaeological sites. Isern et al. [-@Isern2012] collate such a data set, and infer the pattern in the spread of agriculture in Neolithic times. Here, we reanalyse this data, using Bayesian kriging to provide estimates of uncertainty.
 
 <!--- { neolithic_data -->
 ```{r neolithic_data, eval=TRUE, echo=TRUE}
@@ -98,6 +80,8 @@ grid_coords_2testSites <- rbind(edinburgh, minsk)
 <!--- } -->
 
 The $z$ values show the earliest date of agriculture at 100 sites, in 000s of years before present (8 ka BP = 8000 years ago).
+
+**Is there a spatial pattern in these data? How would you interpret it?**
 
 We convert the data to a "geodata" object used by the `geoR` package, and use its built-in summary and plot routines.
 
@@ -151,7 +135,7 @@ First, we need to specify the prior distributions for the $\phi$, $\tau^2$ and $
 * range $\phi$ - we assume a uniform distribution between 0 and twice the maximum in the data
 * intercept $\tau^2$ - this is specified as a fraction of the asymptote $\sigma^2$, "tausq.rel". We assume a uniform distribution between 0 and 0.9. 
 * asymtote $\sigma^2$ - we assume a "reciprocal" prior, where larger values become diminishingly probable, in inverse proportion to  $\sigma^2$
-* mean $\beta$ - we assume a uniform distribution between 0 and infinity i.e. completely uninformative; "flat" in the geoR syntaxt
+* mean $\beta$ - we assume a uniform distribution between 0 and infinity i.e. completely uninformative; "flat" in the geoR syntax.
 
 The lines below specify these distributions, which are plotted below.
 
@@ -181,7 +165,7 @@ plot((1/seq(0,2, by = 0.1)^2)/100, type = "l",
 
 ## Estimate the vargiogram model parameters
 Now we use the `krige.bayes` function to estimate the variogram parameters.
-We dont make predictions over the grid yet to make the computation quick.
+We do not make predictions over the grid yet, to make the computation quick.
 
 <!--- { Bayesian_version -->
 ```{r, eval=TRUE, echo=TRUE}
@@ -189,8 +173,6 @@ system.time(
 bsp <- krige.bayes(
   dg,
   loc="no",
-  #loc=edinburgh,
-  #loc=grid_coords,
   prior=prior.control( 
     beta.prior="flat",
     sigmasq.prior="reciprocal",
@@ -208,7 +190,7 @@ The plot below shows the mean and median of the posterior distribution,
 plus some limits on the envelope of the distribution.
 
 <!--- { Plot estimated variogram -->
-```{r, eval=TRUE, echo=FALSE, warnings=FALSE, messages=FALSE}
+```{r, eval=TRUE, echo=TRUE, warnings=FALSE, messages=FALSE}
 par(mfrow = c(1, 1))
 vgm_lfit <- likfit(dg, ini = c(0.5, 0.5), fix.nugget = FALSE, messages = FALSE)
 vgm <- variog(dg)
@@ -259,8 +241,6 @@ Next we make our posterior predictions over the grid covering the whole of Europ
 system.time(
 bsp <- krige.bayes(
   dg,
-  #loc="no",
-  #loc=edinburgh,
   loc=grid_coords,
   prior=prior.control( 
     beta.prior="flat",
@@ -326,26 +306,6 @@ plot(coastsCoarse, add=TRUE, col='blue')
 <!--- } -->
 
 
-<!--- { More images -->
-```{r, eval=FALSE, echo=FALSE}
-par(mfrow = c(2, 2))
-image(bsp, main="predicted values")  
-image(bsp, val="variance", main="prediction variance")
-image(bsp, val= "simulation", number.col=1,
-      main="a simulation from the \npredictive distribution")
-image(bsp, val= "simulation", number.col=2,
-      main="another simulation from \nthe predictive distribution")
-
-persp(bsp, main="predicted values")  
-persp(bsp, val="variance", main="prediction variance")
-persp(bsp, val= "simulation", number.col=1,
-      main="a simulation from the \npredictive distribution")
-persp(bsp, val= "simulation", number.col=2,
-      main="another simulation from \nthe predictive distribution")
-```
-<!--- } -->
-
-
 **How does the distribution of observations match the uncertainty?**
 $~$
 \
@@ -376,16 +336,12 @@ The observations have clear spatial trends, the largest running SE to NW.  It ma
 
 <!--- { With spatial trends -->
 ```{r, eval=TRUE, echo=FALSE}
-# Now we do the analysis with east*north trends:
-# vgm  <- variog(dg, trend = "1st")
-# plot(vgm)
+# Now we do the analysis with east + north trends:
 system.time(
 bsp <- krige.bayes(
   dg,
-  #loc=edinburgh,
   loc=grid_coords,
   model=model.control( 
-    #trend.d="cte", trend.l="cte",
     trend.d=~coords[,1]+coords[,2],
     trend.l=~grid_coords[,1]+grid_coords[,2],
     cov.model="matern",
@@ -393,7 +349,6 @@ bsp <- krige.bayes(
   prior=prior.control( 
     beta.prior="flat",
     sigmasq.prior="reciprocal",
-    #phi.prior="fixed", phi = 30,
     phi.prior="uniform", 
     phi.discrete=seqphi_sparse,
     tausq.rel.discrete = seqtau_sparse,
@@ -407,7 +362,7 @@ bsp <- krige.bayes(
 Again, we can plot the posterior distribution of the three variogram parameters
 
 <!--- { With spatial trends -->
-```{r, eval=TRUE, echo=FALSE}
+```{r, eval=TRUE, echo=TRUE}
 # Now we do the analysis with east*north trends:
 par(mfrow = c(2, 2))
 plot(bsp)
@@ -459,17 +414,14 @@ points(spdf_2testSites, col='red', pch = 15, cex = 1.5)
 
 Lastly, we can look at two contrasting sites, Edinburgh and Minsk, the red squares in the map above. Minsk (in Belarus) is outwith the area covered by observations.
 
-<!--- { Just Edinburgh -->
+<!--- { Edinburgh and Minsk -->
 ```{r, eval=TRUE, echo=FALSE}
-# Now we do the analysis with east*north trends:
+# Predict for only two sites, including east & north trends:
 system.time(
 bsp <- krige.bayes(
   dg,
-  #loc=edinburgh,
   loc=grid_coords_2testSites,
-  #loc=grid_coords,
   model=model.control( 
-    #trend.d="cte", trend.l="cte",
     trend.d=~coords[,1]+coords[,2],
     trend.l=~grid_coords_2testSites[,1]+grid_coords_2testSites[,2],
     cov.model="matern",
@@ -477,7 +429,6 @@ bsp <- krige.bayes(
   prior=prior.control( 
     beta.prior="flat",
     sigmasq.prior="reciprocal",
-    #phi.prior="fixed", phi = 30,
     phi.prior="uniform", 
     phi.discrete=seqphi_sparse,
     tausq.rel.discrete = seqtau_sparse,
@@ -502,28 +453,6 @@ $~$
 $~$
 **Is it clear why the uncertainties are different?**
 
-<!--- { With Gaussian prior for beta -->
-```{r, eval=FALSE, echo=FALSE}
-# Now we do the analysis (note the Gaussian prior for beta):
-bsp <- krige.bayes(
-                      dg,
-                      loc=grid_coords_2testSites,
-                      model=model.control( trend.d=~coords[,1]+coords[,2],
-                                           trend.l=~grid_coords_2testSites[,1]+grid_coords_2testSites[,2],
-                                           cov.model="matern",
-                                           kappa=0.5, aniso.pars=NULL, lambda=1 ),
-                      prior=prior.control( beta.prior = "normal", beta = c(0,0,0),
-                                           beta.var = cbind(c(10,0,0),c(0,10,0),c(0,0,10)),
-                                           sigmasq.prior="reciprocal",
-                                           phi.prior="uniform", 
-                                           phi.discrete=seqphi_sparse,
-                                           tausq.rel.discrete = seqtau_sparse,
-                                           tausq.rel.prior="uniform"),
-                      output=output.control( n.posterior=100 )
-                               )
-```
-<!--- } -->
-
 ## Things to explore:
 
 * Can you find a way to decrease the uncertainties?
@@ -547,280 +476,5 @@ p
 ```
 <!--- } -->
 
-<!--- { quadrat_data -->
-```{r quadrat_data, eval=FALSE, echo=FALSE}
-fname <- "./icos_veg_SP-II_.xlsx"
-#excel_sheets(fname)
-df_loc <- read_excel(fname, sheet = "SP-II locations")
-df     <- read_excel(fname, sheet = "AMo ICOS vegetation 13 Aug 2019", skip = 3)
-
-# summary(df_loc)
-# summary(df)
-# str(df)
-
-# rbind all together in one df
-# df <- NULL
-# for (i in 1:30){
-  # sname <- paste0("Plot ", i)
-#  df <- read_excel(fname, sheet = 1, skip = 3)
-#  df$quadratID <- i
-  # df <- rbind(df, data.frame(quadratID = i, read_excel(fname, sheet = sname, skip = 3)))
-# }
-#df$SpeciesName <- df$Species.subplot
-#df <- subset(df, !is.na(Species.subplot))
-df <- replace(df, is.na(df), 0)
-#View(df)
-
-# transpose for decorana etc
-# first remember the names
-sppNames <- df$Species
-
-# transpose all but the first column (name)
-dfw <- as.data.frame(t(df[,-1]))
-colnames(dfw) <- sppNames
-
-#str(dfw) # Check the column types
-
-# dfg <- gather(df, key = subquadrat, value = presence, X1, X2, X3, 
-  # X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, 
-  # X18, X19, X20, X21, X22, X23, X24, X25)
-# # head(dfg)
-
-# dfgg <- group_by(dfg, quadratID, Species.subplot)
-# dfm <- summarise(dfgg, mean=mean(presence))
-# # head(dfm)
-# # View(dfm)
-# dfw <- spread(dfm, key = Species.subplot, value = mean)
-zeroSpp <- colMeans(dfw) == 0
-zeroSite <- rowMeans(dfw) == 0 # no empty sites
-dfw <- dfw[, !zeroSpp]
-dfw <- dfw[!zeroSite, ]
-#View(dfw)
-#dfw <- as.data.frame(dfw[,-1])
-#dfw <- dfw * 100 # convert fractions to percentages
-#str(dfw)
-m <- dfw
-write.csv(dfw, file = "auch_community_matrix_2019.csv", row.names = FALSE)
-
-dfw$PLOT_ID <- row.names(dfw)
-dfl <- merge(df_loc, dfw, by.x = "PLOT_ID", by.y = "PLOT_ID")
-```
-<!--- } -->
-
-<!--- { maps -->
-```{r maps, eval=FALSE, echo=FALSE}
-names(dfl) <- make.names(names(dfl))
-
-# lon-lat co-ordinates for the tower location at Auchencorth
-# Auchencorth
-towerLon_degE <- -3.243208
-towerLat_degN <- 55.792372
-df_tower <- data.frame(East = towerLon_degE, North = towerLat_degN)
-# project to OSGB
-coordinates(df_tower) <- ~ East + North
-projection(df_tower) <- projlonlat
-df_tower <- spTransform(df_tower, projOSGB)
-df_tower <- as.data.frame(df_tower)
-
-
-# project to OSGB
-coordinates(dfl) <- ~ PLOT_LOCATION_LONG + PLOT_LOCATION_LAT
-projection(dfl) <- projlonlat
-dfl <- spTransform(dfl, projOSGB)
-dfl <- as.data.frame(dfl)
-dfl$East <- dfl$PLOT_LOCATION_LONG 
-dfl$North <- dfl$PLOT_LOCATION_LAT
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Sample.1..MJ. > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Sample.1..MJ.))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Sample.2..MJ. > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Sample.2..MJ.))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Agrostis.stolonifera > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Agrostis.stolonifera))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Carex.nigra..sample.1...2.NVD. > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Carex.nigra..sample.1...2.NVD.))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Carex.echinata > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Carex.echinata))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Poa.trivialis..sample.4.NVD. > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Poa.trivialis..sample.4.NVD.))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Festuca.ovina > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Festuca.ovina))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Anthoxanthum.odoratum > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Anthoxanthum.odoratum))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Agropyron.repens..sample.4.NVD. > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Agropyron.repens..sample.4.NVD.))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-p <- ggplot(dfl, aes(East, North)) + theme_bw()
-p <- p + geom_point(data = df_tower, shape = 17, size = 4)
-p <- p + geom_point(colour = "light blue")
-p <- p + geom_text(data = subset(dfl, Luzula.multiflora > 0), aes(label = paste(SP.I.number., SP.II.number., sep = "-"), colour = Luzula.multiflora))
-p <- p + scale_color_gradient(low="black", high="black")
-p
-
-# [23] "Eriophorum.vaginatum"            "Eriophorum.angustifolium"       
-# [25] "Carex.nigra..sample.1...2.NVD."  "Carex.echinata"                 
-# [27] "Poa.trivialis..sample.4.NVD."    "Festuca.ovina"                  
-# [29] "Molinia.caerulea"                "Deschampsia.flexuosa"           
-# [31] "Nardus.stricta"                  "Anthoxanthum.odoratum"          
-# [33] "Agropyron.repens..sample.4.NVD." "Juncus.squarrosus"              
-# [35] "Juncus.effusus"                  "Luzula.multiflora" 
-
-# References
-```
-<!--- } -->
-
-<!--- { decorana -->
-```{r decorana, eval=FALSE, echo=FALSE}
-#vegemite(m, scale = "Hult")
-dca <- decorana(m)
-v_dca1_sitescore <- summary(dca)$site.scores[,1]
-# tabasco(m, dca, scale="Braun")
-
-## Classification trees for species
-plotree <- hclust(vegdist(m), "average")
-plotree$labels <- rownames(m)
-## Automatic reordering of clusters
-tabasco(m, use = dca)
-```
-<!--- } -->
-
-<!--- { Juncus_maps -->
-```{r Juncus_maps, eval=FALSE, echo=FALSE}
-
-p <- ggplot(as.data.frame(dfl), aes(East, North)) + theme_bw()
-p <- p + geom_point(aes(colour = z), size = 5)
-p <- p + scale_color_gradient(low="blue", high="orange")
-p
-
-
-#coordinates(dfl) <- ~ East + North
-dfl$z <- v_dca1_sitescore
-dfl$z <- dfl$Juncus.effusus
-dfl$z <- dfl$Eriophorum.vaginatum
-dfl$z <- dfl$Pleurozium.schreberi
-dfl$z <- dfl$Polytrichum.commune
-dfl$z <- dfl$Deschampsia.flexuosa
-dfl$z <- dfl$Molinia.caerulea
-dfl$z <- log(dfl$z + 1)
-hist(log(dfl$z + 1))
-hist(dfl$z)
-v = variogram(z ~ 1, dfl[complete.cases(dfl$z), ], cloud = TRUE)
-v = variogram(log(dfl$z + 1) ~ 1, dfl)
-plot(v)
-m <- fit.variogram(v, vgm(c("Lin", "Exp", "Sph", "Mat", "Ste", "Gau", "Cir")), fit.kappa = TRUE)
-plot(v, m)
-m
-
-```
-<!--- } -->
-
-<!--- { tobasco -->
-```{r tabasco, eval=FALSE, echo=FALSE}
-## No reordering of taxonomy
-#tabasco(m, plotree)
-# Species cluster: most dissimilarity indices do a bad job when
-# comparing rare and common species, but Raup-Crick makes sense
-sptree <- hclust(vegdist(t(m), "raup"), "average")
-tabasco(m, use = dca, sptree)
-```
-<!--- } -->
-
-<!--- { twinspan -->
-```{r twinspan, eval=FALSE, echo=FALSE}
-# res <- twinspan (m, modif = TRUE, clusters = 2)
-# k <- cut (res)
-
-#pl <- ordiplot (dca, main = 'Modified TWINSPAN')
-pl <- ordiplot (dca, type = 'n', display = 'si', xlim = c(-3, 4), ylim = c(-2.5, 3), main = 'Modified TWINSPAN')
-#points (dca, col = k)
-#points(pl, "sites", pch=21, col="red", bg="yellow")
-text(pl, "species", col="blue", cex=0.9)
-# text(pl$sites, col = k, cex=0.9)
-#identify(pl$sites)
-#pl$sites
-# for (i in 1:max(k)) ordihull (dca, groups = k, show.group = i, col = i, draw = 'polygon', label = TRUE)
-```
-<!--- } -->
-
-<!--- { predict_decorana_wv -->
-```{r predict_decorana_wv, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
-df_wv <- as.data.frame(raster::extract(s_wv, dfl))
-#df_wv <- as.data.frame(raster::extract(s_ap_winter, df)) # compare with model using rgb only
-#coordinates(df_wv) <- coordinates(df)
-names(dfl)
-
-df_wv$z <- v_dca1_sitescore 
-df_wv$z <- dfl$Juncus.effusus
-df_wv$z <- dfl$Eriophorum.vaginatum
-
-mm <- lm(z ~ . , data = df_wv, na.action = na.exclude)
-summary(mm)
-plot(mm)
-plot(df_wv$z, predict(mm, na.action = na.pass))
-abline(0,1)
-
-dfl$z <- resid(mm, na.action = na.pass)
-# measures of accuracy
-#mean(abs((df_test$dca1 - dca1_predicted)/df_test$dca1) * 100)
-#hist(abs(df_test$dca1 - dca1_predicted))
-#mean(abs(df_test$dca1 - dca1_predicted))
-```
-<!--- } -->
-
-<!--- { map_predict_decorana_wv -->
-```{r map_predict_decorana_wv, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
-df_dummy <- data.frame(Easting = 0, Northing = 0, class = 0)
-r_dca1 <- predict(s_wv, mm)
-r_dca1 <- predict(s_wv, mm, const = df_dummy)
-#hist(r_dca1)
-plot(r_dca1)
-plot(r_dca1, zlim = c(-2, 2))
-points(dfl)
-```
-<!--- } -->
 
 # References

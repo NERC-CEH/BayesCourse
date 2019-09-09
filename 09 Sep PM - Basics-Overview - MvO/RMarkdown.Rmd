@@ -3,14 +3,16 @@ title: "Literate programming using R Markdown"
 author: "MvO"
 date: '`r Sys.Date()`'
 output:
+  word_document: default
   html_document:
     number_sections: yes
     toc: yes
   pdf_document:
     number_sections: yes
     toc: yes
-  word_document: default
 subtitle: With code examples in R
+editor_options: 
+  chunk_output_type: inline
 ---
 
 # Introduction

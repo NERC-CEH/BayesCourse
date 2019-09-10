@@ -1,0 +1,258 @@
+---
+title: "Bayesian Methods for Ecological and Environmental Modelling"
+author: "Lindsay Banin"
+date: "September 2019"
+output:
+  html_document:
+    df_print: paged
+subtitle: 'Spatial Data: Practical 2'
+---
+
+<!--- { rendering -->
+```{r rendering, eval=FALSE, echo=FALSE}
+library(rmarkdown)
+system.time(render("spatial_Practical2.Rmd", output_file = "spatial_Practical2.html"))
+system.time(render("spatial_Practical2.Rmd", output_file = "spatial_Practical2.pdf"))
+knitr::purl("spatial_Practical1.Rmd")
+```
+<!--- } -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(raster)
+library(geoR)
+```
+
+This practical is performed in geoR - you may want to access the geoR documentation as you go through it - https://cran.r-project.org/web/packages/geoR/geoR.pdf
+
+# Introduction to Case Study 2: Swiss Rainfall
+This example makes use of Swiss rainfall data from 1986 available within the geoR package. The full dataset (sic.all) has 467 spatial records (corresponding to weather stations) and is partitioned into (sic.100) which can be used for estimation and (sic.367) which can be used for prediction and validation.There is also a mitrix named sic.borders which defines the Swiss country border. 
+
+
+First, explore the data. We can see that it is already stored as a geodata object and includes location coordinates (coords), rainfall measurements (data), and elevation values (altitude). We can also visualise the data:
+
+```{r}
+points(sic.100, borders=sic.borders,col="green")
+points(sic.367, borders=sic.borders,col="red",add=TRUE)
+plot.geodata(sic.100,bor=sic.borders)
+```
+
+The method we propose assumes that the data are normally distributed. However, the histogram indicates the data are skewed. A square-root transformation improves the approximation to Normal, as shown in the histogram.
+
+
+```{r}
+data.t <- (sqrt(sic.100$data))
+hist(data.t)
+# Looks better!
+
+
+# Find in sic.all the 100 locations given in sic.100 to be used for estimation
+index.est <- which(as.numeric(rownames(sic.all$coords)) %in% as.numeric(rownames(sic.100$coords)))
+est.coord <- sic.all$coords[index.est,]
+# Square-root transform the rainfall data to approximate a Normal distribution
+est.data <- sqrt(sic.all$data[index.est])
+est.elevation <- sic.all$altitude[index.est]
+hist(est.data)
+
+# Prepare data for validation
+val.coord <- sic.all$coords[-index.est,]
+val.data <- sqrt(sic.all$data[-index.est])
+val.elevation <- sic.all$altitude[-index.est]
+
+# Create geodata objects for analysis in geoR
+est.df <- data.frame(est.coord,est.data,est.elevation)
+est.geo <- as.geodata(est.df, coords.col=1:2, data.col=3, covar.col=4)
+plot.geodata(est.geo)
+val.df <- data.frame(val.coord,val.data,val.elevation)
+val.geo <- as.geodata(val.df, coords.col=1:2, data.col=3, covar.col=4)
+
+# Prepare grid for prediction
+```
+
+# Construct the variogram
+We construct a variogram using the `geoR` `variog()` function.  First we see the unbinned variogram cloud (all location pairs at all distances). The second variogram creates bins for separation distance and calculates the mean semivariance in each.
+```{r}
+par(mfrow=c(1,2), mar=c(3,3,1,1), mgp =c (2,1,0))
+vario.c <- variog(est.geo, op="cloud")
+plot(vario.c)
+
+vario.ex <- variog(est.geo, bin.cloud=TRUE)
+plot(vario.ex)
+
+```
+
+We can explore some example correlation functions and see how they fit the variogram initially using the ordinary least squares approach for conventional kriging. You can use 'summary (model)' to examine the estimated parameter values in each case.
+
+```{r}
+# OLS variogram fits (minimises sum of squares between experimental and theoretical variogram
+# ini.cov.pars gives initial values. 
+vario.sphe<-(variofit(vario.ex,cov.model= "spher",ini.cov.pars=c(18,90)))
+vario.exp<-(variofit(vario.ex,cov.model= "exp",ini.cov.pars=c(18,90)))
+vario.exp2<-(variofit(vario.ex,cov.model= "exp",ini.cov.pars=c(18,90),nug=3))
+vario.mat<-(variofit(vario.ex,cov.model= "matern",ini.cov.pars=c(18,90),nug=0,kappa=0.5))
+# Notice here the addition of the kappa parameter - a smoothing parameter for the matern correlation function
+
+par(mfrow=c(2,2), mar=c(3,3,1,1), mgp =c (2,1,0))
+plot(vario.ex, main="Spherical")
+lines(vario.sphe)
+plot(vario.ex, main="Exponential")
+lines(vario.exp)
+plot(vario.ex, main="Exponential with nugget")
+lines(vario.exp2)
+plot(vario.ex, main="Matern")
+lines(vario.mat)
+
+
+```
+
+# Model estimation
+
+Recall that function 'krige.bayes' requires the following components: 'model.control', 'prior.control' and 'output.control'. 
+Model.control is where we specify our mean trends (where the default is "cte" or constant over space, 1st or 2nd order polynomial on the coordinates, or as a function of covariates). Here, we also specify our correlation function (cov.model).
+
+In prior.control we specify the priors for $\beta$ (MEAN), $\phi$ (RANGE), $\tau^2$ (NUGGET) and $\sigma^2$ (PARTIAL SILL) parameters. In geoR's 'krige.bayes' function we have a set of possible priors for each parameter (as such, it is not as flexible as some other software). 
+
+* range $\phi$ - we assume a uniform distribution between 0 and twice the maximum in the data
+* intercept $\tau^2$ - this is specified as a fraction of the asymptote $\sigma^2$, "tausq.rel". We assume a uniform distribution between 0 and 1. 
+* asymtote $\sigma^2$ - we assume a "reciprocal" prior, where larger values become diminishingly probable, in inverse proportion to  $\sigma^2$
+* mean $\beta$ - we assume a uniform distribution between 0 and infinity i.e. completely uninformative; "flat" in the geoR syntax
+
+```{r}
+MC <- model.control(trend.d="cte", trend.l="cte", cov.model="sphe")
+
+maxdist  <- vario.ex$max.dist
+
+PC <- prior.control(beta.prior="flat", sigmasq.prior="reciprocal", phi.prior="uniform",   phi.discrete=seq(0, 2*maxdist, l = 51), tausq.rel.prior="uniform", tausq.rel.discrete = seq(0, 1, by=0.05))
+
+OC <- output.control(n.posterior=10, n.pred = 10, quantile = c(0.1, 0.25, 0.5, 0.75, 0.9))
+
+kb1 <- krige.bayes(data=est.data, coords=est.coord,locations=val.coord,
+	borders=sic.borders,model=MC, prior=PC, output=OC)
+
+# Lets plot the results. First, the variogram:
+
+par(mfrow = c(1, 1))
+vario_likfit <- likfit(est.geo, ini = c(18, 90), fix.nugget = FALSE, messages = FALSE)
+vario <- variog(est.geo)
+vario_env <- variog.model.env(est.geo, obj.variog = vario,
+                             model.pars = vario_likfit)
+plot(vario, env = vario_env)
+lines(kb1, summary.posterior = mean)
+lines(kb1, summ = median, lty = 2)
+legend(0.15, 150, legend = c("posterior mean",
+  "posterior median"), lty = c(1, 2), lwd = c(1, 1), cex = 0.8)
+
+# And the posterior distribution for the four parameters
+par(mfrow = c(2, 2))
+plot(kb1)
+plot(density(kb1$posterior$sample$sigmasq), main = "", xlab = expression(sigma^2))
+plot(density(kb1$posterior$sample$beta), main = "", xlab = expression(beta))
+```
+
+
+It is good to consider if there might be mean trends - for example, relationships between the response (i.e. rainfall) and covariates for which we have data (i.e. altitude) so that these can be accommodated in the model. Later, we could consider if it is better to model these relationships or spatial trends. Here we explore these relationships for both the estimation (n=100) and validataion (n=367) datasets. 
+
+```{r}
+plot(est.data ~ est.elevation, main="Estimation dataset")
+plot(val.data ~ val.elevation, main="Validation dataset")
+lm1 <- lm(est.data ~ est.elevation)
+summary(lm1)
+lm2 <- lm(val.data ~ val.elevation)
+summary(lm2)
+```
+
+The regression model indicates for the larger dataset there is a significant relationship between the two variables, so we will try to model this mean, linear trend ($\beta$ parameters) - notice the new formulation of model.control. In doing this, we remove the trend with altitude and essentially model the spatial patterns in the residuals.
+
+```{r}
+MC2 <- model.control(trend.d=~est.elevation, trend.l=~val.elevation, cov.model="sphe")
+
+maxdist  <- vario.ex$max.dist
+
+PC <- prior.control(beta.prior="flat", sigmasq.prior="reciprocal", phi.prior="uniform",   phi.discrete=seq(0, 2*maxdist, l = 51), tausq.rel.prior="uniform", tausq.rel.discrete = seq(0, 1, by=0.05))
+
+OC <- output.control(n.posterior=10, n.pred = 10, quantile = c(0.1, 0.25, 0.5, 0.75, 0.9))
+
+system.time(
+  kb2 <- krige.bayes(data=est.data, coords=est.coord,locations=val.coord,
+    borders=sic.borders,model=MC2, prior=PC, output=OC)
+)
+```
+
+Let's compare the variograms for the two models:
+
+```{r}
+par(mfrow = c(1, 2))
+vario <- variog(est.geo)
+plot(vario)
+vario2 <- variog(est.geo, trend=~est.elevation)
+plot(vario2)
+
+
+# And the posterior distribution for the four parameters
+par(mfrow = c(2, 2))
+plot(kb1)
+plot(density(kb1$posterior$sample$sigmasq), main = "", xlab = expression(sigma^2))
+plot(density(kb1$posterior$sample$beta), main = "", xlab = expression(beta))
+
+
+# Notice the different beta parameters in the two models
+colMeans(kb1$posterior$sample)
+colMeans(kb2$posterior$sample)
+
+```
+
+# Model prediction
+Lets see how well we have predicted the 367 out-of-sample validation data points with the two models:
+```{r}
+names(kb2$predictive)
+par(mfrow=c(1,2))
+plot(kb1$predictive$mean ~ val.data)
+plot(kb2$predictive$mean ~ val.data)
+lm1 <- lm(kb1$predictive$mean ~ val.data)
+lm2 <- lm(kb2$predictive$mean ~ val.data)
+summary(lm1)
+summary(lm2)
+
+```
+
+What do you notice from these models? How does this relate to what you observed in the variograms?
+
+Now let us predict across the whole of Switzerland. To do this we create a new prediction grid. (Note - why below do we revert to the constant mean model?)
+```{r}
+pred.grid <- expand.grid(seq(0,350, l=51),seq (0,220, l=51))
+rgb.palette <- colorRampPalette(c("blue", "lightblue",
+"orange", "red"),space = "rgb")
+
+MC2 <- model.control(trend.d="cte", trend.l="cte", cov.model="sphe")
+
+maxdist  <- vario.ex$max.dist
+
+PC <- prior.control(beta.prior="flat", sigmasq.prior="reciprocal", phi.prior="uniform",   phi.discrete=seq(0, 2*maxdist, l = 51), tausq.rel.prior="uniform", tausq.rel.discrete = seq(0, 1, by=0.05))
+
+OC <- output.control(n.posterior=10, n.pred = 10, quantile = c(0.1, 0.25, 0.5, 0.75, 0.9))
+system.time(
+  kb3 <- krige.bayes(data=est.data, coords=est.coord,locations=pred.grid,
+    borders=sic.borders,model=MC2, prior=PC, output=OC)
+)
+names(kb3)
+
+par(mfrow=c(1,2))
+image(kb3, values=kb3$predictive$mean, loc = pred.grid,col =rgb.palette(20) ,xlab="Coord X",ylab="Coord Y",borders=sic.borders,main="Estimation")
+points(est.coord)
+
+image(kb3, values=kb3$predictive$variance,loc = pred.grid,col=rgb.palette(20),
+xlab="Coord X",ylab="Coord Y",borders=sic.borders,
+main="Kriging variance")
+points(est.coord)
+```
+
+What do you notice about the variance (uncertainty) - where is it higher and why?
+
+# Open-ended tasks
+- Try fitting different covariance models (e.g. Matern; exponential). What do you notice about the variograms, fitted values and variance when different models are used?
+
+- Try fitting different priors - how much do these choices affect the model results and uncertainty?

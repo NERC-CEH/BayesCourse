@@ -1,0 +1,480 @@
+---
+title: 'Bayesian Methods for Ecological and Environmental Modelling'
+subtitle: 'Spatial Data: Practical 1'
+author: "Peter Levy"
+date: "10 September 2019"
+output:
+  rmarkdown::html_document:
+#  rmarkdown::pdf_document:
+#    keep_tex: yes
+csl: copernicus-publications.csl
+bibliography: spatial_Practical1.bib
+---
+
+
+<!--- { rendering -->
+```{r rendering, eval=FALSE, echo=FALSE}
+library(rmarkdown)
+system.time(render("spatial_Practical1.Rmd", output_file = "spatial_Practical1.html"))
+system.time(render("spatial_Practical1.Rmd", output_file = "spatial_Practical1.pdf"))
+knitr::purl("spatial_Practical1.Rmd")
+```
+<!--- } -->
+
+<!--- { startup -->
+```{r startup, eval=TRUE, echo=TRUE, include=FALSE}
+rm(list=ls(all=TRUE))
+library(ggplot2)
+library(rworldmap)
+library(raster)
+library(geoR)
+set.seed(448)
+
+#Define geographic projections to be used
+# lat / lon 
+projlonlat <- CRS("+proj=longlat +datum=WGS84")
+# OSGB 1936 / British National Grid 
+projOSGB <-  CRS("+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +datum=OSGB36 +units=m +no_defs")
+```
+<!--- } -->
+
+# Introduction
+In this practical session, we will look at real examples of applying the Bayesian approach to statistical spatial modelling. 
+The field of spatial modelling has developed its own terminology which can be confusing, but the gist is simple.
+We have observations of a variable $z$ at a number of locations.
+To estimate or predict $z$ at a new location, we could use the mean of the observations *weighted by their proximity* (i.e.by the inverse of distance from the new location).  Nearby points have a strong influence, far-away points less so.
+
+A more sophisticated approach is to model how proximity actually influences the weights, based on the observed data. This model is known as a (semi)variogram - for every pair of points, we calculate the distance separating them and the difference in $z$ (expressed as half of the squared difference).
+Often, nearby points tend to be similar; 
+as distance between points increases, they are generally less similar, so 
+the semivariance increases to an asymptote, which is the overall variance in $z$.
+
+![\label{fig:variogram_model} *Variogram model showing the typical increase in dissimilarity as distance between points increases. The commonly used terms for the parameters of such a model are shown.*](./variogram_model.png)
+
+Using the weights calculated from a fitted variogram model to predict values on a grid around the observations is known as "kriging", and is a standard way of interpolating spatial data.
+Conventional kriging fits the variogram model by least-squares, and then treats this as a fixed, known quantity.
+The Bayesian approach recognises that we do not know the true variogram model parameters, but estimates their posterior probability distribution, given the data. We can then sample many possible realisations of the variogram parameters, and thereby produce many possible realisations of the predictions (the interpolated values on a grid). Considering the variance among these realisations gives us a good estimate of uncertainty in the predicted values of $z$, and potentially  better estimate of the mean.
+
+We now consider two examples of of applying Bayesian kriging to real spatial estimation problems.
+We use the the `geoR` package in R to do this.  This allows us to use (hopefully) familar R function syntax, and saves us having to write out the whole geostatistical model in JAGS.
+
+# Case study 1: Spread of Agriculture in the Neolithic Period
+Around 8000 years ago, human society made the transition from hunter-gathering to growing domesticated crops - the start of agriculture. Radiocarbon data from agricultural artefacts can give an estimate of the earliest date for agriculture at archaeological sites. Isern et al. [-@Isern2012] collate such a data set, and infer the pattern in the spread of agriculture in Neolithic times. Here, we reanalyse this data, using Bayesian kriging to provide estimates of uncertainty.
+
+<!--- { neolithic_data -->
+```{r neolithic_data, eval=TRUE, echo=TRUE}
+# First, we load the data, put it in an empty raster and plot it.
+load(file = "neolithic.RData")
+data(coastsCoarse)
+r <- raster(ext = extent(df), nrows = 20, ncols = 20)
+r <- rasterize(df, r, field = "CALBP")
+plot(r)
+plot(coastsCoarse, add=TRUE, col='blue')
+points(df)
+title(main = "Date of earliest agriculture", sub = "000 years Before Present")
+grid_coords <- coordinates(r) # save the xy locations for geoR
+edinburgh <- c(-3, 56)        # a location for prediction in lon, lat
+minsk     <- c(29, 56)        # a location for prediction in lon, lat
+grid_coords_2testSites <- rbind(edinburgh, minsk)
+```
+<!--- } -->
+
+The $z$ values show the earliest date of agriculture at 100 sites, in 000s of years before present (8 ka BP = 8000 years ago).
+
+**Is there a spatial pattern in these data? How would you interpret it?**
+
+We convert the data to a "geodata" object used by the `geoR` package, and use its built-in summary and plot routines.
+
+<!--- { Bayesian_version -->
+```{r Bayesian_version, eval=TRUE, echo=TRUE}
+# df is the common generic data frame name
+# dg is my analagous generic geodata object name
+dg <- as.geodata(df, data.col = 4) # date "CALBP" is in the fourth column
+summary(dg)
+plot(dg)
+```
+<!--- } -->
+
+**What features do you notice in the data?**
+$~$
+\
+\
+\
+\
+$~$
+
+## Construct a variogram
+We construct a variogram using the `geoR` `variog()` function.  This creates bins for separation distance and calculates the semivariance in each.
+
+<!--- { remove for now
+$\gamma (h)={\dfrac {1}{2n(h)}}\sum _{i=1}^{n(h)}[z(x_{i}+h)-z(x_{i})]^{2}$
+where $h$ is the distance between points, and $n_{i}(h)$ is the number of paired data at distance $h$
+<!--- } -->
+
+<!--- { Bayesian_version -->
+```{r, eval=TRUE, echo=TRUE}
+vgm <- variog(dg)
+plot(vgm)
+```
+<!--- } -->
+
+**Does the variogram look reasonable?**
+$~$
+\
+\
+$~$
+
+Examine the `vgm` object.  `vgm$n` gives the number of points in each distance bin.
+The greatest separation distances have fewest points, so carry less weight. We will use the `krige.bayes` function to estimate the parameters of a vargiogram model, and to predict values on the regular grid shown in the first figure.
+
+## Specifying priors
+First, we need to specify the prior distributions for the $\phi$, $\tau^2$ and $\sigma^2$ parameters (and also for $\beta$, the mean of $z$, although this is not a spatial parameter - yet).
+
+`geoR` does not use MCMC to estimate parameters, but an approximation. One of the numerical tricks it uses is to discretise some of the prior distributions to make computation easier. We do this here for $\phi$ and $\tau^2$:
+
+* range $\phi$ - we assume a uniform distribution between 0 and twice the maximum in the data
+* intercept $\tau^2$ - this is specified as a fraction of the asymptote $\sigma^2$, "tausq.rel". We assume a uniform distribution between 0 and 0.9. 
+* asymtote $\sigma^2$ - we assume a "reciprocal" prior, where larger values become diminishingly probable, in inverse proportion to  $\sigma^2$
+* mean $\beta$ - we assume a uniform distribution between 0 and infinity i.e. completely uninformative; "flat" in the geoR syntax.
+
+The lines below specify these distributions, which are plotted below.
+
+<!--- { Make priors -->
+```{r, eval=TRUE, echo=TRUE}
+maxdist  <- vgm$max.dist
+seqphi_sparse <- seq(0, 2*maxdist, by = 5)
+seqtau_sparse <- seq(0, 0.9, by=0.05)
+```
+<!--- } -->
+
+<!--- { Plot priors -->
+```{r, eval=TRUE, echo=FALSE}
+par(mfrow = c(1, 3))
+plot(seqphi_sparse, rep(1/length(seqphi_sparse), length(seqphi_sparse)), type = "l",
+  xlab = "phi", ylab = "Prior probability")
+lines(c(0, seqphi_sparse, 2*maxdist), c(0, rep(1/length(seqphi_sparse), length(seqphi_sparse)), 0), type = "l")
+
+plot(seqtau_sparse, rep(1/length(seqtau_sparse), length(seqtau_sparse)), type = "l",
+  xlab = "tau", ylab = "Prior probability")
+lines(c(0, seqtau_sparse, 0.9), c(0, rep(1/length(seqtau_sparse), length(seqtau_sparse)), 0), type = "l")
+
+plot((1/seq(0,2, by = 0.1)^2)/100, type = "l",
+  xlab = "sigmasq", ylab = "Prior probability")
+```
+<!--- } -->
+
+## Estimate the vargiogram model parameters
+Now we use the `krige.bayes` function to estimate the variogram parameters.
+We do not make predictions over the grid yet, to make the computation quick.
+
+<!--- { Bayesian_version -->
+```{r, eval=TRUE, echo=TRUE}
+system.time(
+bsp <- krige.bayes(
+  dg,
+  loc="no",
+  prior=prior.control( 
+    beta.prior="flat",
+    sigmasq.prior="reciprocal",
+    phi.prior="uniform", 
+    phi.discrete=seqphi_sparse,
+    tausq.rel.discrete = seqtau_sparse,
+    tausq.rel.prior="uniform"),
+  output=output.control( n.posterior=10000, messages=FALSE)
+  )
+)
+```
+<!--- } -->
+
+The plot below shows the mean and median of the posterior distribution, 
+plus some limits on the envelope of the distribution.
+
+<!--- { Plot estimated variogram -->
+```{r, eval=TRUE, echo=TRUE, warnings=FALSE, messages=FALSE}
+par(mfrow = c(1, 1))
+vgm_lfit <- likfit(dg, ini = c(0.5, 0.5), fix.nugget = FALSE, messages = FALSE)
+vgm <- variog(dg)
+vgm_env <- variog.model.env(dg, obj.v = vgm,
+                             model.pars = vgm_lfit)
+plot(vgm, env = vgm_env)
+lines(bsp, summary.posterior = mean)
+lines(bsp, summ = median, lty = 2)
+#lines(bsp, summ = "mode", post = "par", lwd = 2, lty = 2)
+legend(0.15, 5, legend = c("posterior mean",
+  "posterior median"), lty = c(1, 2), lwd = c(1, 1), cex = 0.8)
+```
+<!--- } -->
+
+We can now plot the posterior distribution of the four parameters
+
+<!--- { Plot estimated parameters -->
+```{r, eval=TRUE, echo=TRUE}
+par(mfrow = c(2, 2))
+plot(bsp)
+#str(bsp$predictive)
+plot(density(bsp$posterior$sample$sigmasq), main = "", xlab = expression(sigma^2))
+plot(density(bsp$posterior$sample$beta), main = "", xlab = expression(beta))
+```
+<!--- } -->
+
+and extract the parameter posterior means and standard deviations.
+
+<!--- { Parameter means -->
+```{r, eval=TRUE, echo=TRUE}
+colMeans(bsp$posterior$sample)
+apply(bsp$posterior$sample, 2, sd)
+```
+<!--- } -->
+
+**Can you relate these values back to the variogram?**
+**Are we reasonably confident in the estimated variogram?**
+$~$
+\
+\
+$~$
+
+## Make predictions
+Next we make our posterior predictions over the grid covering the whole of Europe. This is more time-consuming, so we produce only 100 samples from the posterior, instead of 10000 as above.
+
+<!--- { Bayesian_version -->
+```{r, eval=TRUE, echo=TRUE}
+system.time(
+bsp <- krige.bayes(
+  dg,
+  loc=grid_coords,
+  prior=prior.control( 
+    beta.prior="flat",
+    sigmasq.prior="reciprocal",
+    phi.prior="uniform", 
+    phi.discrete=seqphi_sparse,
+    tausq.rel.discrete = seqtau_sparse,
+    tausq.rel.prior="uniform"),
+  output=output.control( n.posterior=100, messages=FALSE)
+  )
+)
+```
+<!--- } -->
+
+
+<!--- { Plot predictions maps -->
+```{r, eval=TRUE, echo=TRUE}
+r_mean  <- setValues(r, bsp$predictive$mean)
+r_var  <- setValues(r, bsp$predictive$variance)
+r_s1 <- setValues(r, bsp$predictive$simulations[,2])
+r_s2 <- setValues(r, bsp$predictive$simulations[,3])
+r_s3 <- setValues(r, bsp$predictive$simulations[,1])
+zrange <- c(min(df$z), max(df$z))
+
+par(mfrow=c(1,2))
+plot(r, main = "Observations", zlim = zrange)
+plot(coastsCoarse, add=TRUE, col='blue')
+
+plot(r_mean, main = "Predictions", zlim = zrange)
+points(df)
+plot(coastsCoarse, add=TRUE, col='blue')
+```
+<!--- } -->
+
+**Do the predictions from Bayesian kriging interpolate in a reasonable way?**
+$~$
+\
+\
+$~$
+
+Critically, Bayesian kriging gives us estimates of uncertainty in the interpolation. The variance plot below shows where we are confident of predictions and where we are not.  This comes from looking across the possible realistions of mapped predictions in our posterior distribution.  Three samples (realistions) are shown below.
+
+
+<!--- { Plot predictions maps -->
+```{r, eval=TRUE, echo=TRUE}
+par(mfrow=c(1,2))
+plot(r_var, main = "Variance")
+points(df)
+plot(coastsCoarse, add=TRUE, col='blue')
+
+plot(r_s1, main = "One realisation", zlim = zrange)
+points(df)
+plot(coastsCoarse, add=TRUE, col='blue')
+
+plot(r_s2, main = "Another realisation", zlim = zrange)
+points(df)
+plot(coastsCoarse, add=TRUE, col='blue')
+
+plot(r_s3, main = "And another", zlim = zrange)
+points(df)
+plot(coastsCoarse, add=TRUE, col='blue')
+```
+<!--- } -->
+
+
+**How does the distribution of observations match the uncertainty?**
+$~$
+\
+\
+$~$
+
+## Including spatial trends
+We can also look at "anisotropy" in the variogram - are things the same in all directions? We use the `variog4` function to do this automatically, looking in four directions (0 = N-S; 45 = NE-SW; 90 = E-W; 135 = SE-NW).
+
+<!--- { Directional variogram -->
+```{r, eval=TRUE, echo=TRUE, warnings=FALSE, messages=FALSE}
+par(mfrow = c(1, 1))
+vgmDir <- variog4(dg)
+plot(vgmDir)
+```
+<!--- } -->
+
+**What do you conclude from this? **
+$~$
+\
+\
+\
+\
+$~$
+
+
+The observations have clear spatial trends, the largest running SE to NW.  It may help to remove the large-scale spatial trend, and krige the residuals.  We can do this by adding trend terms in the model.control section of krige.bayes, for both the observations (trend.d for "data") and prediction (trend.l for "locations").
+
+<!--- { With spatial trends -->
+```{r, eval=TRUE, echo=FALSE}
+# Now we do the analysis with east + north trends:
+system.time(
+bsp <- krige.bayes(
+  dg,
+  loc=grid_coords,
+  model=model.control( 
+    trend.d=~coords[,1]+coords[,2],
+    trend.l=~grid_coords[,1]+grid_coords[,2],
+    cov.model="matern",
+    kappa=0.5, aniso.pars=NULL, lambda=1 ),
+  prior=prior.control( 
+    beta.prior="flat",
+    sigmasq.prior="reciprocal",
+    phi.prior="uniform", 
+    phi.discrete=seqphi_sparse,
+    tausq.rel.discrete = seqtau_sparse,
+    tausq.rel.prior="uniform"),
+  output=output.control( n.posterior=100, messages=FALSE)
+  )
+)
+```
+<!--- } -->
+
+Again, we can plot the posterior distribution of the three variogram parameters
+
+<!--- { With spatial trends -->
+```{r, eval=TRUE, echo=TRUE}
+# Now we do the analysis with east*north trends:
+par(mfrow = c(2, 2))
+plot(bsp)
+plot(density(bsp$posterior$sample$sigmasq), main = "", xlab = expression(sigma^2))
+vgm  <- variog(dg, trend = "1st")
+plot(vgm)
+```
+<!--- } -->
+
+and extract the parameter posterior means and standard deviations.  $\beta$ is no longer the mean, but the regression coefficients for $x$, $y$ and $xy$.
+
+<!--- { Parameter means -->
+```{r, eval=TRUE, echo=TRUE}
+colMeans(bsp$posterior$sample)
+apply(bsp$posterior$sample, 2, sd)
+```
+<!--- } -->
+
+**Has this improved the variogram estimation?**
+$~$
+\
+\
+$~$
+
+Plotting the new predictions, we can see they have not changed dramatically.
+
+<!--- { Parameter means -->
+```{r, eval=TRUE, echo=TRUE}
+r_mean  <- setValues(r, bsp$predictive$mean)
+r_var  <- setValues(r, bsp$predictive$variance)
+r_s1 <- setValues(r, bsp$predictive$simulations[,2])
+r_s2 <- setValues(r, bsp$predictive$simulations[,3])
+zrange <- c(min(df$z), max(df$z))
+
+par(mfrow=c(1,2))
+plot(r, main = "Observations", zlim = zrange)
+plot(coastsCoarse, add=TRUE, col='blue')
+
+plot(r_mean, main = "Predictions", zlim = zrange)
+points(df)
+plot(coastsCoarse, add=TRUE, col='blue')
+# add in two test sites too
+spdf_2testSites <- as.data.frame(grid_coords_2testSites)
+coordinates(spdf_2testSites) <- ~V1 + V2
+projection(spdf_2testSites) <- projlonlat
+points(spdf_2testSites, col='red', pch = 15, cex = 1.5)
+```
+<!--- } -->
+
+Lastly, we can look at two contrasting sites, Edinburgh and Minsk, the red squares in the map above. Minsk (in Belarus) is outwith the area covered by observations.
+
+<!--- { Edinburgh and Minsk -->
+```{r, eval=TRUE, echo=FALSE}
+# Predict for only two sites, including east & north trends:
+system.time(
+bsp <- krige.bayes(
+  dg,
+  loc=grid_coords_2testSites,
+  model=model.control( 
+    trend.d=~coords[,1]+coords[,2],
+    trend.l=~grid_coords_2testSites[,1]+grid_coords_2testSites[,2],
+    cov.model="matern",
+    kappa=0.5, aniso.pars=NULL, lambda=1 ),
+  prior=prior.control( 
+    beta.prior="flat",
+    sigmasq.prior="reciprocal",
+    phi.prior="uniform", 
+    phi.discrete=seqphi_sparse,
+    tausq.rel.discrete = seqtau_sparse,
+    tausq.rel.prior="uniform"),
+  output=output.control( n.posterior=1000, messages=FALSE)
+  )
+)
+
+# get the mean and sd for the two sites
+bsp$predictive$mean
+sqrt(bsp$predictive$variance)
+
+par(mfrow = c(2, 2))
+plot(bsp)
+plot(density(bsp$predictive$simulations[1,]), main = "Posterior distribution, Edinburgh", xlim = c(2,8))
+plot(density(bsp$predictive$simulations[2,]), main = "Posterior distribution, Minsk", xlim = c(2,8))
+```
+<!--- } -->
+$~$
+\
+\
+$~$
+**Is it clear why the uncertainties are different?**
+
+## Things to explore:
+
+* Can you find a way to decrease the uncertainties?
+* Try different:
+    + variogram models
+    + prior distributions
+    + spatial trends
+
+How would you estimate the uncertainties in a non-Bayesian way?
+
+How would you incorporate the uncertainty in the radiocarbon dates themselves?
+
+<!--- { radiocarbon date uncertainty -->
+```{r, eval=TRUE, echo=FALSE}
+p <- ggplot(as.data.frame(df), aes(UNCAL_BP, CALBP, 
+  ymin = CALBP - ST_DEV/1000, ymax = CALBP + ST_DEV/1000))
+p <- p + geom_point()
+p <- p + geom_pointrange()
+p
+
+```
+<!--- } -->
+
+
+# References

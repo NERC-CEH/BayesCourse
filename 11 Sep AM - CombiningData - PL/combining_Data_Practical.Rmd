@@ -1,0 +1,393 @@
+---
+title: 'Bayesian Methods for Ecological and Environmental Modelling'
+subtitle: 'Combining Diverse Data Sets'
+author: "Peter Levy"
+date: "11 September 2019"
+output:
+  rmarkdown::html_document:
+#  rmarkdown::pdf_document:
+#    keep_tex: yes
+csl: copernicus-publications.csl
+bibliography: combiningData.bib
+---
+
+
+<!--- { rendering -->
+```{r rendering, eval=FALSE, echo=FALSE}
+library(rmarkdown)
+system.time(render("combining_Data_Practical.Rmd", output_file = "combining_Data_Practical.html"))
+system.time(render("combining_Data_Practical.Rmd", output_file = "combining_Data_Practical.pdf"))
+system.time(render("combining_Data_Practical.Rmd", output_file = "combining_Data_Practical.docx"))
+knitr::purl("combining_Data_Practical.Rmd")
+```
+<!--- } -->
+
+<!--- { load_data -->
+```{r start_up, eval=TRUE, echo=FALSE, include=FALSE}
+rm(list=ls(all=TRUE))
+#install.packages("BayesianTools")
+library(knitr)
+load(file = "landUseChange.RData", verbose = TRUE)
+```
+<!--- } -->
+
+<!--- { Introduction -->
+# Introduction
+In this practical session, we will look at an example of applying the Bayesian approach to combining information from different data sources. It is common to have multiple sources of information, of varying quality and coverage. For examples, we might have:
+
+* estimates of butterfly abundance from well-designed ecological surveys, and also from citizen science records, with more potential bias and uncertainty
+* many measurements of air quality from cheap, low-precision instruments, and a small number from expensive, high-precision instruments
+* estimates of hedgerow length from ground-based survey and from satellite/aerial photography.
+* estimates of different parts of a catchment water balance - rainfall, soil moisture, evaporation, and stream flow.
+
+Here, we will focus on how to specify the likelihood function appropriately to include multiple terms. We can call this approach "data assimilation" in a general sense, as it assimilates data from different sources into our estimates of model parameters and predictions. (Note that "data assimilation" sometimes has a more restricted meaning). Computationally, it is the same as Bayesian "calibration" or "parameter estimation". However, the likelihood function can become too complicated to use the short-cut methods shown earlier (`rstanarm` or `geoR`). We could write out the model in full in JAGS. Alternatively, we can use the R package `BayesianTools`, which allows us to specify the likelihood as an R function.  This is neat compromise - giving us the flexibility of calling all the functionality of R, whilst automatically handling the MCMC computation. Here, we consider an example of applying the Bayesian approach to estimating land-use change.
+
+# Case study: Estimating land-use change
+![\label{fig:Fig3_map_landUse_2015} *Land use in Scotland, according to the CEH Land Cover Map 2015. *](./Fig3_map_landUse_2015.png)
+
+Land-use change is an important issue worldwide -  afforestation, deforestation, cropland expansion and abandonment, and urban encroachment affect many ecosystems.
+Understanding the type and extent of land-use change is important, but the nature of the problem is potentially complex.
+Ideally we would like to know exactly which parcels of land change to a new use each year.
+However, the data available at national scale are often rather poor and inconsistent.
+Satellite products are not yet accurate enough to detect change reliably, except for large areas of deforestation.
+The best approach is to combine all the available data (e.g. from agricultural censuses, forest inventories, urban planning, satellite products) to produce an integrated estimate. This approach is described in a recent paper [@Levy2018], if you are interested in more details, and we reproduce the basics here.
+<!--- } -->
+
+<!--- { Terminology -->
+# Terminology and data types
+We consider four types of land use $u$: $\{\mathrm{forest, crop, grassland, urban}\}$. 
+
+We have two time steps, t$_1$ and t$_2$, with one time interval between them.
+
+Ideally, we want to know the parameters of the transition matrix which represents the areas changing from one land use to another in that time interval:  
+
+\begin{equation*} \label{eq:BetaMatrix}
+\mathbf{B} = 
+\begin{bmatrix}
+    \beta_{11} & \beta_{12} & \beta_{13} & \beta_{14} \\
+    \beta_{21} & \beta_{22} & \beta_{23} & \beta_{24} \\
+    \beta_{31} & \beta_{32} & \beta_{3}  & \beta_{34} \\
+    \beta_{41} & \beta_{42} & \beta_{43} & \beta_{44}
+\end{bmatrix}
+\end{equation*}
+
+e.g. $\beta_{23}$ is the area changing from land-use type 2 (crop) to land-use type 3 (grassland) in km^2^. 
+The diagonal is the unchanged area.
+A numerical example is shown below.
+```{r, eval=TRUE, echo=FALSE}
+knitr::kable(m_B_true, caption = "Area changing from land-use in row $i$ to land-use in column $j$ in km$^2$.")
+```
+
+The $\beta$ matrix parameters are usually unknown, but we can estimate them using several different kinds of data.
+
+## Net land-use change
+We may know the net change in the area of the different land uses from agricultural records, urban planning data etc.
+
+We can compare this with calculation from the (unknown) $\beta$ matrix, where the net land-use change is given by the column sums minus the row sums:
+
+\begin{equation} \label{eq:DAfromB}
+\Delta A_{u} =  \sum_{j = 1}^{n_u} \beta_{uj} - 
+                \sum_{i = 1}^{n_u} \beta_{iu}
+\end{equation}
+where $i$ and $j$ are the row and column indices, or in R code:
+```{r, eval=FALSE, echo=TRUE}
+  dA_net <- colSums(m_B) - rowSums(m_B)
+```
+
+## Land-use areas at time t$_1$ and t$_2$
+We may also have data on the absolute areas in each land use at time t$_1$ and t$_2$. This might come from maps, satellite data, or ground-based statistics.
+
+We can relate these to the $\beta$ matrix paramters, where the net land-use change is given by the column sums minus the row sums:
+
+\begin{align} \label{eq:AfromB}
+A_{u,t_1} =& \sum_{i = 1}^{n_u} \beta_{iu} \\
+A_{u,t_2} =& \sum_{j = 1}^{n_u} \beta_{uj}
+\end{align}
+
+or in R:
+
+```{r, eval=FALSE, echo=TRUE}
+A_t1 <- rowSums(m_B)
+A_t2 <- colSums(m_B)
+```
+## Gross land-use change
+Lastly, we may have more detailed data on the gross gains in a land-use type, or on the gross losses. For example, in the UK, Forestry Commission statistics provide an estimate of the total area of gross afforestation, independent of estimates of the absolute forest area or its net change. Similarily, a felling license is needed to clear forests, and this gives an estimate of gross deforestation.
+In terms of the $\beta$ matrix paramters, the gross gains 
+are given by the column sum minus the unchanging area, and analagously for gross losses:
+
+\begin{align} \label{eq:GLfromB}
+G_u =& \sum_{i = 1}^{n_u} \beta_{iu} - \beta_{i=u,u} \\
+L_u =& \sum_{j = 1}^{n_u} \beta_{uj} - \beta_{u,j=u}
+\end{align}
+
+or in R:
+
+```{r, eval=FALSE, echo=TRUE}
+dA_gain_obs <- colSums(m_B) - diag(m_B)
+dA_loss_obs <- rowSums(m_B) - diag(m_B)
+```
+
+The equations above provide a simple model which predicts three different variables (net change, absolute areas, and gross change).
+The model allows us to relate the parameters $\beta$ to observed data of these three different types. We can therefore apply the Bayesian approach, using MCMC to eatimate the posterior distribution of the $\beta$ parameters and predicted land-use area changes.
+We could write out the model in JAGS, but the functions `colSums, rowSums` and `diag` do not exist in JAGS, so these would have to be written in a long-winded form.
+Instead, we can use the package `BayesianTools`, which handles the MCMC computation, but allows the likelhood function to be written in R.
+<!--- } -->
+
+## Model functions
+First, we define the model as a set of functions which give meaningful names to the matrix arithmetic operations.
+
+<!--- { helper functions -->
+```{r, eval=TRUE, echo=TRUE}
+# predict the net change in area for each land use from a matrix
+getAreaNetChange_fromBeta <- function(v_B){
+  m_B <- matrix(v_B, n_u, n_u)
+  dA_net <- colSums(m_B) - rowSums(m_B)
+  return(dA_net)  
+}
+
+# calculate the gross changes in area for each land use in a Beta transition matrix
+getAreaGrossChange_fromBeta <- function(v_B){
+  m_B <- matrix(v_B, n_u, n_u)
+  # subtract the unchanged area (diagonal) to get gross gains and losses
+  A_gain <- colSums(m_B) - diag(m_B)
+  A_loss <- rowSums(m_B) - diag(m_B)
+  return(rbind(A_gain, A_loss))  
+}
+
+# calculate the area at t1 and t2 for each land use in a Beta transition matrix
+getAreas_fromBeta <- function(v_B){
+  m_B <- matrix(v_B, n_u, n_u)
+  # rows add to the time1 area; cols add to the time2 area
+  A_t1 <- rowSums(m_B)
+  A_t2 <- colSums(m_B)
+  return(rbind(A_t1, A_t2))  
+}
+```
+<!--- } -->
+
+
+# Setting up `BayesianTools`
+Next, we load the libraries and the example data set.
+
+<!--- { load_data -->
+```{r load_data, eval=TRUE, echo=TRUE}
+library(BayesianTools)
+set.seed(448)
+load(file = "landUseChange.RData", verbose = TRUE)
+```
+<!--- } -->
+
+This loads a data set for a hypothetical 100 km$^2$ region, with:
+
+* `A_obs` - the observed areas for each of the four land-use types at t1 and t2
+* `dA_net_obs` - the observed net change in area for the four land-use types
+* `dA_gain_obs` - the observed gross gain in area for the four land-use types
+* `dA_loss_obs` - the observed gross loss in area for the four land-use types
+* `m_B_prior` - a weakly informative guess at the areas in the $\beta$ matrix.
+
+<!--- { priors -->
+## Specify prior distributions
+We specify a very simple uniform distribution for all the $\beta$ parameters with the `createUniformPrior` function.
+
+```{r, eval=TRUE, echo=TRUE}
+v_B_prior <- as.vector(m_B_prior)
+prior <- createUniformPrior(
+  best = v_B_prior, 
+  lower = rep(0, n_u^2), 
+  upper = rep(50, n_u^2))
+  
+# Initial values for chains
+m_starter <- matrix(rep(m_B_prior, 3), nrow = 3, byrow = TRUE)
+m_starter[1,] <- m_starter[1,] * runif(n_u^2, 0.5, 1.5)
+m_starter[3,] <- m_starter[3,] * runif(n_u^2, 0.5, 1.5)
+```
+<!--- } -->
+
+<!--- { likelihood functions -->
+## Likelihood function
+Now we come to the key business of defining the likelihood function. First, we will just use the net area change observations `dA_net_obs`, and define the function below.
+
+```{r, eval=TRUE, echo=TRUE}
+# calculates the log-likelihood of B matrix given observations 
+# of net area change 
+getLogLikelihood_net <- function(v_B){
+  # net change
+  dA_net_pred <- getAreaNetChange_fromBeta(v_B)
+  # use constant CV for sigma in obs for simple example
+  loglik_net <- dnorm(dA_net_obs, mean = dA_net_pred, 
+                sd = max(1, 0.1*abs(dA_net_obs)), log = T)
+  return(sum(loglik_net, na.rm = TRUE))  
+}
+```
+
+There are effectively only two lines, but lets go through what they do.
+`dA_net_pred <- getAreaNetChange_fromBeta(v_B)` calls the function we defined earlier, and returns the vector of net area change predicted by a set of $\beta$ parameters.
+
+```{r, eval=FALSE, echo=TRUE}
+loglik_net <- dnorm(dA_net_obs, mean = dA_net_pred, 
+                sd = max(1, 0.1*abs(dA_net_obs)), log = T)
+```
+This compares these predictions with the observations, by saying "return the probability density (=likelihood) of observing `dA_net_obs` if the true mean is `dA_net_pred`".
+This assumes a normal distribution in the observation uncertainty, with a coefficient of variation of 10 %.  We use log-likelihoods, because it is more convenient to add these rather than multiply.
+
+To show this graphically, we can look at the log of the normal density curve, which gives the log-likelihood.
+
+```{r, eval=TRUE, echo=FALSE}
+x <- seq(-2, 2, by = 0.1)
+plot(x, dnorm(x, mean = 0, sd = 0.1, log = T), type = "l",
+  xlab = "Difference between observation and prediction",
+  ylab = "Log-likelihood")
+```
+
+<!--- } -->
+
+## Running the MCMC
+Now we have defined our prior and likelihood, we can run an MCMC.
+
+<!--- { Running the MCMC -->
+```{r, eval=TRUE, echo=TRUE}
+setUp <- createBayesianSetup(getLogLikelihood_net, prior = prior)
+
+n_iter <- 9000 # set the number of MCMC iterations
+thin <- round(max(1, n_iter/1000))
+n_chains <- 3  # use three chains
+settings <- list(iterations = n_iter,  thin = thin,  nrChains = n_chains, startValue = m_starter, message = FALSE)
+system.time(out <- runMCMC(bayesianSetup = setUp, sampler = "DEzs", settings = settings))
+```
+<!--- } -->
+
+You should see the log-likelihood in the three chains increasing (less negative) as the MCMC progresses. When it is finished, you can look at the trace plots and the estimated posterior distributions of the parameters.
+
+<!--- { Plot the output -->
+```{r, eval=TRUE, echo=TRUE}
+plot(out, which = 1:2)
+#marginalPlot(out, whichParameters = 1:2)
+# plot(out, which = 5:8)
+# plot(out, which = 9:12)
+# plot(out, which = 13:16)
+#gelmanDiagnostics(out, plot = TRUE)
+```
+<!--- } -->
+
+You might want to increase `n_iter`, and/or re-run starting where your MCMC left off with `out <- runMCMC(out)`.
+
+**Do your estimates converge on sensible values?**
+
+At this point, we can reveal that the true $\beta$ values are those shown in the table above, and we can plot our estimates against these.  "MAP" is the "maximum a posteriori" parameter set, i.e. that with the highest posterior probability.
+
+<!--- { Plot the output -->
+```{r, eval=TRUE, echo=TRUE}
+v_B_map <- MAP(out)$parametersMAP
+getAreaNetChange_fromBeta(v_B_map)
+dA_net_obs
+# save MAP prediction values to array
+m_B_map <- matrix(v_B_map, n_u, n_u)  
+round(m_B_map, 2)
+round(m_B_true, 2)
+plot(m_B_true, m_B_map)
+abline(0, 1)
+```
+
+So, it looks like our estimates are poor.
+
+We can add a further source of data to better constrain the estimates.  We will next add the observations on the absolute areas at times t1 and t2 to the likelihood function. We do this in the function below.
+
+<!--- { Better likelihood -->
+```{r, eval=TRUE, echo=TRUE}
+# calculates the log-likelihood of B matrix given observations 
+# of areas at t1 and t2
+getLogLikelihood_Areas_t1t2 <- function(v_B){
+  # get total area for each land use at time 1 and 2
+  A_pred <- getAreas_fromBeta(v_B)
+  loglik_A_t1  <-  dnorm(A_obs[1,], mean = A_pred[1,], sd = max(1, 0.1*abs(A_obs[1,])), log = TRUE)
+  loglik_A_t2  <-  dnorm(A_obs[2,], mean = A_pred[2,], sd = max(1, 0.1*abs(A_obs[2,])), log = TRUE)
+  return(sum(loglik_A_t1, loglik_A_t2, na.rm = TRUE))  
+}
+
+# calculates the log-likelihood of B matrix given observations 
+# of net area change and areas as t1 and t2
+getLogLikelihood_net_t1t2 <- function(v_B){
+  loglik_net <- getLogLikelihood_net(v_B)
+  loglik_t1t2 <- getLogLikelihood_Areas_t1t2(v_B)
+  return(sum(loglik_net, loglik_t1t2, na.rm = TRUE))  
+}
+```
+
+We run this as before, 
+
+```{r, eval=TRUE, echo=TRUE}
+setUp <- createBayesianSetup(getLogLikelihood_net_t1t2, prior = prior)
+system.time(out <- runMCMC(bayesianSetup = setUp, sampler = "DEzs", settings = settings))
+plot(out, which = 1:2)
+v_B_map <- MAP(out)$parametersMAP
+getAreaNetChange_fromBeta(v_B_map)
+dA_net_obs
+m_B_map <- matrix(v_B_map, n_u, n_u)  
+round(m_B_map, 2)
+round(m_B_true, 2)
+plot(m_B_true, m_B_map)
+abline(0, 1)
+```
+<!--- } -->
+
+This is better, but still not great. Can we improve it by adding the observations of gross area changes to likelihood function? We do this in the function below.
+
+<!--- { Even Better likelihood -->
+```{r, eval=TRUE, echo=TRUE}
+# calculates the log-likelihood of B matrix given observations 
+# of gross area change 
+getLogLikelihood_gross <- function(v_B){
+  # gross changes
+  dA_gross_pred <- getAreaGrossChange_fromBeta(v_B)
+  loglik_gain  <-  dnorm(dA_gain_obs, mean = dA_gross_pred[1,], 
+                     sd = max(1, 0.1*abs(dA_gain_obs)), log = TRUE)
+  loglik_loss  <-  dnorm(dA_loss_obs, mean = dA_gross_pred[2,], 
+                     sd = max(1, 0.1*abs(dA_loss_obs)), log = TRUE)
+  return(sum(loglik_gain, loglik_loss, na.rm = TRUE))  
+}
+
+# calculates the log-likelihood of B matrix given observations 
+# of net area change and areas as t1 and t2 and gross change
+getLogLikelihood_net_t1t2_gross <- function(v_B){
+  loglik_net <- getLogLikelihood_net(v_B)
+  loglik_t1t2 <- getLogLikelihood_Areas_t1t2(v_B)
+  loglik_gross <- getLogLikelihood_gross(v_B)
+  return(sum(loglik_net, loglik_t1t2, loglik_gross, na.rm = TRUE))  
+}
+```
+
+Again, we run this as before, 
+
+```{r, eval=TRUE, echo=TRUE}
+setUp <- createBayesianSetup(getLogLikelihood_net_t1t2_gross, prior = prior)
+system.time(out <- runMCMC(bayesianSetup = setUp, sampler = "DEzs", settings = settings))
+plot(out, which = 1:2)
+plot(out, which = 3:4)
+#plot(out, which = 5:8)
+v_B_map <- MAP(out)$parametersMAP
+getAreaNetChange_fromBeta(v_B_map)
+dA_net_obs
+m_B_map <- matrix(v_B_map, n_u, n_u)  
+round(m_B_map, 2)
+round(m_B_true, 2)
+plot(m_B_true, m_B_map)
+abline(0, 1)
+```
+<!--- } -->
+
+
+Our estimates are now much closer to the true values, and the chains converge more satisfactorily. Adding in additional data sources clearly helps constrain our estimates
+
+# Further things to explore
+* Try using different priors e.g. truncated normal.
+* How long do your chains need to be to get good results?  Try the `gelmanDiagnostics(out, plot = TRUE)` function.
+* Try other combinations of the data sets. How well does using only gross change constrain the parameters?
+* Try changing the observation uncertainty the data sets. For example, what if we are very certain of the net change, but very uncertain of the gross change?
+
+
+# Summary
+* The Bayesian approach can combine observational data of different types and qualities in a manner consistent with probability theory.
+* `BayesianTools` provides a flexible way to apply the Bayesian approach to any kind of model you want to define in R (or even outwith R, as we will see this afternoon).
+
+
+# References

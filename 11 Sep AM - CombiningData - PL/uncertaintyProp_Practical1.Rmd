@@ -1,0 +1,308 @@
+---
+title: 'Bayesian Methods for Ecological and Environmental Modelling'
+subtitle: 'Uncertainty Propagation'
+author: "Peter Levy"
+date: "11 September 2019"
+output:
+  rmarkdown::html_document:
+#  rmarkdown::pdf_document:
+#    keep_tex: yes
+# csl: copernicus-publications.csl
+# bibliography: uncertaintyProp_Practical1.bib
+---
+
+
+<!--- { rendering -->
+```{r rendering, eval=FALSE, echo=FALSE}
+library(rmarkdown)
+system.time(render("uncertaintyProp_Practical1.Rmd", output_file = "uncertaintyProp_Practical1.html"))
+system.time(render("uncertaintyProp_Practical1.Rmd", output_file = "uncertaintyProp_Practical1.pdf"))
+knitr::purl("uncertaintyProp_Practical1.Rmd")
+```
+<!--- } -->
+
+# Introduction
+In this practical session, we will look at an example of applying the Bayesian approach to propagating uncertainty in observations.
+Measurements often involve one or more calibration steps because we do not directly measure the quantity of interest, but something closely related to it.
+Environmental sensors (thermometers, anemometers, pH probes etc.) are designed to give an output signal which closely matches the input (temperature, wind, pH etc).
+The "measurement" or "observation" thereby has an implicit modelling step (such as a calibration curve), and the uncertainty in this is usually ignored, assuming it is negligible. However, sometimes the calibration curve contains substantial uncertainty, and this should be propagated into any analysis which uses the data.
+
+The Bayesian approach recognises that we do not know the true calibration parameters, but estimates their posterior probability distribution, given the data. We can then sample many possible realisations of the calibration parameters, and thereby produce many possible realisations of the predictions (the values that we indirectly measure). Considering the variance among these realisations gives us a good estimate of uncertainty in the calibrated values.
+
+Here, we consider an example of applying the Bayesian approach to a real calibration problem - estimating flow in a stream. We use the `rstanarm` package in R to do this (`rstanarm` stands for "Applied Regression Modelling with Stan in R"). This allows us to use the same syntax as for standard linear modelling in R, and saves us having to write out the model in full in another language. Like JAGS, Stan is both a language for specifying probabilistic models, and a computer program to solve them, written in C++. (Stan is named after Stanislaw Ulam, inventor of the Monte Carlo method). For our purposes, `rstanarm` provides an easy way to specify a model and estimate the parameters by MCMC very efficiently.
+
+# Case study: Measurement of stream flow
+Measuring and understanding flow in rivers and streams is a fundamental part of hydrology. The response of stream flow to rainfall in the catchment determines the likelihood of flooding, and tells us about evapo-transpiration in the catchment. To estimate the annual loss of nitrogen, carbon or pollutants from a catchment, we need to know the annual stream flow.
+
+![\label{fig:streamgauge} *Measurement of stream flow. The stream flow rate $Q_{\mathrm{flow}}$ is the product of the stream cross-sectional area and its velocity. A pressure transducer continuously records stream height via the pressure, $P_{\mathrm{stream}}$. We use this to estimate the flow via a calibration curve. *](./streamgauge1.png)
+
+The quantity we actually measure continuously is the water pressure, $P_{\mathrm{stream}}$ in milli bars (mbar), with a pressure transducer located in the stream. The measured pressure is directly related to the volume of water in the column above the sensor, and thus the height of the stream. The height of the stream is related to the stream flow rate or discharge $Q_{\mathrm{flow}}$ in l s$^{-1}$, from the geometry shown above. We thus have a linear model:
+
+\begin{equation} \label{eq:discharge1}
+Q_{\mathrm{flow}}   = \beta_1 + \beta_2 P_{\mathrm{stream}} + \epsilon
+\end{equation}
+
+which we need to calibrate. This is done with manual monthly measurements of stream height, width and velocity. In this practical, we look at how the uncertainty in this calibration propagates, with an example from a local field site - the Black Burn at Auchencorth Moss south of Edinburgh, which feeds into the North Esk river.
+
+# Data set: Black Burn at Auchencorth Moss
+First, we load the data set and examine it.
+
+<!--- { load_data -->
+```{r load_data, eval=TRUE, echo=TRUE, warnings=FALSE, messages=FALSE}
+rm(list=ls(all=TRUE))
+library(ggplot2)
+library(openair)
+library(rstanarm)
+load(file = "streamflow.RData", verbose = TRUE)
+```
+<!--- } -->
+
+We have two data frames:
+
+* `df` - the continuous record of daily mean stream pressure for 2017
+* `df_calib` - the calibration data of stream pressure and actual streamflow (i.e. from manual height, width and velocity measurements).
+
+We can plot the pressure data against time with the `timePlot` function.
+
+<!--- { plot the data -->
+```{r, eval=TRUE, echo=TRUE}
+# df is the common generic data frame name
+summary(df)
+timePlot(df, pollutant = c("P_stream")) 
+```
+<!--- } -->
+
+**What causes the peaks in the data?**
+$~$
+\
+\
+\
+\
+$~$
+
+# Calibration
+Now we look at the calibration data, `df_calib`.
+
+<!--- { calibration data -->
+```{r, eval=TRUE, echo=TRUE}
+summary(df_calib)
+plot(Q ~ P_stream, data = df_calib)
+m_lm <- lm(Q ~ P_stream, data = df_calib)
+abline(m_lm, col = "blue")
+```
+<!--- } -->
+
+**Does the calibration curve look linear?**
+
+**How does the range compare with the continuous data?**
+
+Using the standard R linear modelling function `lm`, we can fit a straight line to the square-root-transformed data.
+
+<!--- { fit lm -->
+```{r, eval=TRUE, echo=TRUE}
+plot(sqrt(Q) ~ P_stream, data = df_calib)
+
+## Fit a linear model
+m_lm <- lm(sqrt(Q) ~ P_stream, data = df_calib)
+abline(m_lm, col = "blue")
+```
+
+Use `summary(m_lm)` to examine the model fit.
+The square-root-transformed version looks a much better fit to the data, especially if we have to extrapolate, so we choose this model, in mathematical form:
+
+\begin{equation*}
+\sqrt{Q_{\mathrm{flow}}}   = \beta_1 + \beta_2 P_{\mathrm{stream}} + \epsilon.
+\end{equation*}
+
+
+In the conventional (non-Bayesian) way, we would simply apply this fitted model to predict streamflow over the rest of the year with the following code.
+
+<!--- { Make lm predictions -->
+```{r, eval=TRUE, echo=TRUE}
+df$Qpred_lm <- predict(m_lm, newdata = df)^2
+```
+and plot the predictions
+```{r, eval=TRUE, echo=TRUE}
+timePlot(df, pollutant = c("P_stream", "Qpred_lm"), scales = "free")
+summary(df)
+```
+This gives an estimate of the mean stream flow as `r round(mean(df$Qpred_lm, na.rm = TRUE), 1)` l s$^{-1}$.
+However, we have not accounted for the uncertainty in the calibration curve in this estimate.
+<!--- } -->
+
+# Bayesian estimation of the calibration curve parameters
+To perform the same procedure, but in a Bayesian way, to include the calibration uncertainty, we can use the `stan_glm` function instead of `lm`. Rather than using least-squares to fit a single value, this estimates the posterior distribution of the calibration curve parameters by an efficient MCMC algorithm.
+
+<!--- { Bayesian_version -->
+```{r, eval=FALSE, echo=TRUE}
+m <- stan_glm(sqrt(Q) ~ P_stream, data = df_calib)
+```
+You may wonder what we have just done.
+
+`stan_glm(sqrt(Q) ~ P_stream)` performs several steps:
+
+* the linear model in R is translated into an equivalent probabilistic model in Stan, similar to a model written in JAGS, as you saw yesterday.
+* "weakly informative" prior distributions are set in the form of: 
+    - for the $\beta$ coefficients, wide normal distributions, centred on zero, with widths scaled in an intelligent way;
+    - for the residual error $\sigma$, an exponential distributions (like the reciprocal prior we saw in `geoR` yesterday);
+* four MCMC chains are run, using the NUTS ("No U-Turn") Sampler, an efficient algorithm for MCMC estimation of the parameter distributions.
+
+In the R console, you will see some of the output from the four MCMC chains.
+
+
+<!--- { Bayesian_version -->
+```{r, eval=TRUE, echo=FALSE, include=FALSE, warnings=FALSE, messages=FALSE}
+m <- stan_glm(sqrt(Q) ~ P_stream, data = df_calib)
+```
+
+First, we will check the prior assumptions
+
+```{r, eval=TRUE, echo=TRUE}
+prior_summary(m)
+```
+
+and we can check the MCMC trace plots for convergence.
+```{r, eval=TRUE, echo=TRUE}
+plot(m, "trace")  
+```
+and the resulting parameter distributions.
+```{r, eval=TRUE, echo=TRUE}
+plot(m, "hist")
+```
+
+We can examine the output in more detail with `summary(m, digits = 4)`, and interactively with:
+<!--- { Bayesian_version -->
+```{r, eval=FALSE, echo=TRUE}
+launch_shinystan(m)
+```
+<!--- } -->
+
+This all looks fine, though we might want longer chains to do this properly, but we can accept the posterior distributions as sensible.  We can summarise the prior and posterior distributions graphically with the code below.
+
+```{r, eval=TRUE, echo=TRUE}
+p <- posterior_vs_prior(m, group_by_parameter = TRUE, 
+  color_by = "vs", facet_args = list(scales = "free"))
+p <- p + 
+ geom_hline(yintercept = 0, size = 0.3, linetype = 3) + 
+ coord_flip() + 
+ ggtitle("Comparing the prior and posterior")
+p <- p + geom_pointrange(size = 0.2)
+p
+
+posterior_interval(m, 0.90)
+```
+<!--- } -->
+
+# Bayesian predictions
+If we are happy with the estimated calibration parameters, we can use them to predict streamflow over the whole year.
+We use the `posterior_predict` function to predict with the parameter distributions estimated by stan_glm.
+
+<!--- { Plot estimated calibration curve -->
+```{r, eval=TRUE, echo=TRUE}
+# make a new data frame without missing values
+df_pred <- na.omit(df)
+# and predict with the parameter distributions estimated by stan_glm
+Q_pred <- posterior_predict(m, newdata = df_pred)^2
+```
+
+To examine these, we will plot three realisations out of the 4000 time series of $Q_{\mathrm{flow}}$ this produces.
+
+```{r, eval=TRUE, echo=TRUE}
+df_pred$Q_pred1 <- Q_pred[1,] 
+df_pred$Q_pred2 <- Q_pred[2,] 
+df_pred$Q_pred3 <- Q_pred[3,] 
+timePlot(df_pred, pollutant = c("Q_pred1", "Q_pred2", "Q_pred3"), ylab = "Q_flow", xlab = "Date, 2017")
+summary(df_pred)
+```
+<!--- } -->
+
+We can now plot the posterior distribution of $Q_{\mathrm{flow}}$ as a time series.
+
+<!--- { Plot Qflow post ts -->
+```{r, eval=TRUE, echo=TRUE}
+df_pred$Q_mean   <- apply(Q_pred, 2, mean)
+df_pred$quant_05 <- apply(Q_pred, 2, quantile, c(0.05))
+df_pred$quant_50 <- apply(Q_pred, 2, quantile, c(0.50))
+df_pred$quant_95 <- apply(Q_pred, 2, quantile, c(0.95))
+p <- ggplot(df_pred, aes(date, y = Q_mean, ymin = quant_05, ymax = quant_95))
+p <- p + geom_ribbon(fill = "blue")
+p <- p + geom_line(colour = "red")
+p
+```
+<!--- } -->
+
+Finally, we can now compare the conventional 
+and full Bayesian estimates of uncertainty.
+The conventional approach is to calculate the standard error in the mean.
+
+<!--- { Plot estimated parameters -->
+```{r, eval=TRUE, echo=TRUE}
+# conventional mean and uncertainty
+mean(df$Qpred_lm, na.rm = TRUE)
+# SE in mean = sd/sqrt(n)
+se <- sd(df$Qpred_lm, na.rm = TRUE) / sqrt(sum(!is.na(df$Qpred_lm)))
+se; se^2 # ^2 to give in variance units
+```
+<!--- } -->
+
+The Bayesian method calculates the additional uncertainty from the calibration relationship, so we have a distribution of possible means, plotted below.
+```{r, eval=TRUE, echo=TRUE}
+# get the mean of each realisation
+Q_pred_means <- apply(Q_pred, 1, mean)
+hist(Q_pred_means)
+```
+
+The standard deviation in this distribution gives the additional uncertainty.
+
+<!--- { Parameter means -->
+```{r, eval=TRUE, echo=TRUE}
+sd(Q_pred_means)
+# a coefficient of variation
+sd(Q_pred_means)/ mean(Q_pred_means) *100
+```
+<!--- } -->
+
+Often, we are interested in the uncertainty in the cumulative annual sum, for example, for comparison with total annual rainfall.  The relative uncertainty in the sum is the same as in the mean. However, it is useful to consider the distribution of time series, to give a visualisation of the absolute uncertainty increasing over time, shown below:
+
+<!--- { Cumulative sum -->
+```{r, eval=TRUE, echo=TRUE}
+# get cumulative sum for each realisation
+Q_pred_sum <- apply(Q_pred, 1, cumsum) / 1000 # l to m3
+
+df_pred$Q_sum        <- apply(Q_pred_sum, 1, mean)
+df_pred$sum_quant_05 <- apply(Q_pred_sum, 1, quantile, c(0.05))
+df_pred$sum_quant_50 <- apply(Q_pred_sum, 1, quantile, c(0.50))
+df_pred$sum_quant_95 <- apply(Q_pred_sum, 1, quantile, c(0.95))
+p <- ggplot(df_pred, aes(date, y = Q_sum, ymin = sum_quant_05, ymax = sum_quant_95))
+p <- p + geom_ribbon(fill = "light blue")
+p <- p + geom_line(colour = "red")
+p
+```
+
+or as the distribution of the annual totals shown below.
+
+```{r, eval=TRUE, echo=TRUE}
+hist(Q_pred_sum[dim(Q_pred_sum)[1],], xlab = "Q_sum, m3 y-1", main = 
+ "Posterior distribution of cumulative annual stream flow, 2017")
+quantile(Q_pred_sum[dim(Q_pred_sum)[1],], c(0.025, 0.5, 0.975))
+sd(Q_pred_sum[dim(Q_pred_sum)[1],]) /
+mean(Q_pred_sum[dim(Q_pred_sum)[1],]) *100
+```
+<!--- } -->
+
+We estimate a 95 % credibility interval in the annual total streamflow between `r round(quantile(Q_pred_sum[dim(Q_pred_sum)[1],], c(0.025)), 2)` and `r round(quantile(Q_pred_sum[dim(Q_pred_sum)[1],], c(0.975)), 2)`.
+
+**Do you think the additional effort is justified in this case?**
+
+
+# Further things to explore
+* Do you get the same results every time?
+* How does the number of sample (chain length) affect results?
+* Try different models for the calibration curve e.g. a quadratic curve.
+* The data set contains gaps. How might we fill these? How would we include the uncertainty this brings?
+
+# Summary
+* The conventional approach is to ignore the observational uncertainty, such as from a the calibration curve.  
+* The Bayesian approach can represent this uncertainty, and propagates it through to estimates of annual mean and total stream flow.
+* `rstanarm` provides a very easy way to apply the Bayesian approach to the common types of statistical model (e.g. regression and mixed-effect models).
+

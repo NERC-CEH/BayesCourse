@@ -10,6 +10,7 @@ rm(list=ls(all=TRUE)) # clear the R slate!
 ### load in data
 tree.data <- read.csv("Hemlock-light-data-simple.csv")
 str(tree.data)
+head(tree.data)
 #############################################################################
 
 

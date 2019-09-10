@@ -10,12 +10,13 @@ rm(list=ls(all=TRUE)) # clear the R slate!
 ### load in data
 tree.data <- read.csv("Hemlock-light-data-hierarchical_2.csv")
 str(tree.data)
+head(tree.data)
 #############################################################################
 
 
 #############################################################################
 ### do some plotting to look at data and fit simple non-linear model
-
+par(mfrow=c(1,1))
 colour <- c("red", "blue", "green")
 col.list <- rep(0, length(tree.data$Site))
 col.list[tree.data$Site=="1"] <- 1 
@@ -66,7 +67,8 @@ ni <- 75000   ;   nt <- 1   ;   nb <- 50000   ;  nc <- 3
 
 ### fit the model in JAGS
 model_2 <- jags(data=data, inits, params, 
-                model.file = "Kate_jags_light_example multi-level.R", n.chains = nc, 
+                model.file = "Kate_jags_light_example multi-level.R", 
+                n.chains = nc, 
                 n.thin = nt, n.iter = ni, n.burnin = nb)
 
 summary(model_2)

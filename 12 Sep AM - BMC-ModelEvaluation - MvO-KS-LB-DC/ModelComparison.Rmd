@@ -1,0 +1,384 @@
+---
+title: "Bayesian Model Comparison (BMC)"
+author: "MvO"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+  word_document: default
+  pdf_document:
+    number_sections: yes
+    toc: yes
+subtitle: An introduction with code examples in R and JAGS
+---
+
+```{r}
+set.seed(13)
+```
+
+# Introduction
+Say we have a set of m different models $M=\{Mi\}_{i=1..m}$. We may be uncertain about which model is the correct one, so we specify a discrete prior distribution p(M). We could for example choose a uniform distribution where initially all models have the same probability: p(M=Mi) = 1/m for i=1..m. If we then get new data D, we can use Bayes' Theorem to update our distribution:
+
+\begin{equation}
+    P(M|D) = {P(M)P(D|M) \over P(D)}.
+\end{equation}
+
+If we are comparing only two models, then the posterior ratio of model probabilities becomes:
+
+\begin{equation}
+    P(M1|D)/P(M2|D) = {P(M1) \over P(M2)}{P(D|M1) \over P(D|M2)}.
+\end{equation}
+
+The model likelihoods on the right must account for the fact that each model has its own set of parameters $\theta i$ about whose values we are uncertain too. So the model likelihoods are averages over their own parameter distribution, and are therefore referred to as 'integrated likelihoods':
+
+\begin{equation}
+    P(D|Mi) = \int P(\theta i)P(D|Mi,\theta i)d\theta i \qquad (i=1,2).
+\end{equation}
+
+So the posterior ratio of model probabilities is their prior ratio times the ratio of integrated likelihoods. That last ratio has a name, it is called the 'Bayes Factor' for the two models, and is denoted as $BF_{12}$. Using that symbol, we can write:
+
+\begin{equation}
+    P(M1|D)/P(M2|D) = {P(M1) \over P(M2)}BF_{12}.
+\end{equation}
+
+So the posterior model odds are prior odds times the Bayes Factor. When the prior model probabilities are the same (uniform distribution over the set of models), posterior odds are equal to the Bayes' Factor.
+
+With a uniform prior over the models, it is easy to extend this formalism to more than two models: just renormalize all integrated likelihoods such that they sum to 1. When the prior is not uniform, we have to normalize the products of prior and integrated likelihood.
+
+Let's now calculate the integrated likelihood for some models.
+
+# Bayesian comparison of regression models in base R
+
+We begin by getting our data, defining our likelihood function, model and prior.
+
+```{r}
+data <- matrix( c(10,  6.09, 1.83,
+                  20,  8.81, 2.64,
+                  # 30, 10.66, 3.27),
+                  30, 10.66+5, 3.27),
+                nrow=3, ncol=3, byrow=T) ; nd <- nrow(data)
+
+# data[,3] <- data[,3] / 10
+
+Li   <- function( model, theta, data, i ) {
+          dnorm( (model(data[i,1],theta)-data[i,2])/data[i,3] ) }
+L    <- function( model, theta, data    ) {
+          prod( sapply(1:nd,function(i){Li(model,theta,data,i)}) ) }
+
+# We define two functions, 'M1' and 'M2': straight line resp. quadratic.
+M1           <- function (x,theta) { theta[1] + theta[2]*x                }
+M2           <- function (x,theta) { theta[1] + theta[2]*x + theta[3]*x^2 }
+prior1       <- matrix( c( 0,10,
+                           0, 1), ncol=2, byrow=T )
+prior2       <- matrix( c( 0,10,
+                           0, 1,
+                          -1, 1), ncol=2, byrow=T )
+np1          <- dim(prior1)[1]
+np2          <- dim(prior2)[1]
+pMin1        <- prior1[,1] ; pMax1 <- prior1[,2]
+pMin2        <- prior2[,1] ; pMax2 <- prior2[,2]
+```
+
+Now we hold off running an MCMC because we want to use the data D first to calculate the integrated likelihood. It would be meaningless to calibrate the model first using D and then use the same D again to calculate the integrated likelihood.
+
+```{r}
+iM <- 1
+```
+
+```{r MLIL, eval=FALSE}
+if(iM==1) {
+  M <- M1 ; np <- np1 ; prior <- prior1
+  }else{
+  M <- M2 ; np <- np2 ; prior <- prior2
+}
+pMin <- prior[,1] ; pMax <- prior[,2]
+
+nSample     <- 100
+# nSample     <-   10000
+samplePrior <- sapply( 1:np, function(i){ runif(nSample,pMin[i],pMax[i]) } )
+
+sampleL     <- rep( NA, nSample )
+for(i in 1:nSample) { sampleL[i] <- L( M, samplePrior[i,], data ) }
+ML          <- max(sampleL)
+MLE         <- samplePrior[ which(sampleL==ML), ]
+
+plot  ( 1:30, M( 1:30, samplePrior[1,] ),
+        type="l", col="black",lty=2, xlim=c(0,30), ylim=c(0,20) )
+points( data    , col='blue' ,lwd=3, cex=2 )
+for(i in 2:nSample) {
+  lines ( 1:30, M( 1:30, samplePrior[i,]), lty=2 ) }
+lines ( 1:30, M( 1:30, MLE ), lty=1, col="red" )
+
+IL <- mean(sampleL)
+cat( "The ML of the model is", ML, "and its IL is", IL )
+```
+
+Let's now calculate the IL for both models, and for each model with two different priors.
+
+```{r M1 with prior A}
+iM     <- 1
+prior1 <- matrix( c( 0, 10,
+                     0,  1 ), ncol=2, byrow=T )
+<<MLIL>>
+  
+MLE_M1_priorA <- MLE ; ML_M1_priorA <- ML ; IL_M1_priorA <- IL ;
+```
+
+```{r M1 with prior B}
+iM     <- 1
+prior1 <- matrix( c( 1, 2  ,
+                     0, 0.5 ), ncol=2, byrow=T )
+<<MLIL>>
+  
+MLE_M1_priorB <- MLE ; ML_M1_priorB <- ML ; IL_M1_priorB <- IL ;
+```
+
+```{r M2 with prior A}
+iM     <- 2
+prior2 <- matrix( c(  0, 10,
+                      0,  1,
+                      0,  0.1 ), ncol=2, byrow=T )
+<<MLIL>>
+  
+MLE_M2_priorA <- MLE ; ML_M2_priorA <- ML ; IL_M2_priorA <- IL ;
+```
+
+```{r}
+iM     <- 2
+prior2 <- matrix( c( 3    , 5  ,
+                     0    , 0.5,
+                     0.005, 0.01 ), ncol=2, byrow=T )
+<<MLIL>>
+  
+MLE_M2_priorB <- MLE ; ML_M2_priorB <- ML ; IL_M2_priorB <- IL ;
+```
+
+```{r}
+signif( c( MLE_M1_priorA ), 2 )
+signif( c( MLE_M1_priorB ), 2 )
+signif( c( MLE_M2_priorA ), 2 )
+signif( c( MLE_M2_priorB ), 2 )
+```
+
+```{r}
+signif( c( ML_M1_priorA, IL_M1_priorA ), 2 )
+signif( c( ML_M1_priorB, IL_M1_priorB ), 2 )
+signif( c( ML_M2_priorA, IL_M2_priorA ), 2 )
+signif( c( ML_M2_priorB, IL_M2_priorB ), 2 )
+```
+
+Posterior model probabilities (if prior over models was uniform):
+
+```{r pMgivenD}
+sum_IL <- IL_M1_priorA + IL_M1_priorB + IL_M2_priorA + IL_M2_priorB
+signif( c( IL_M1_priorA / sum_IL ), 2 )
+signif( c( IL_M1_priorB / sum_IL ), 2 )
+signif( c( IL_M2_priorA / sum_IL ), 2 )
+signif( c( IL_M2_priorB / sum_IL ), 2 )
+```
+
+# Bayesian comparison of regression models in JAGS
+
+We now work with the same two models in JAGS. The approach to model comparison will be slightly different, as it will include running an MCMC of the models against the data.
+
+```{r JAGS M1A & M2A}
+library(rjags)
+
+M1A.JAGS <- " model {
+  for (i in 1:n) {
+    y[i]      ~ dnorm( y.hat[i], tau.y[i] )
+    y.hat[i] <- b0 + b1 * t[i]
+    tau.y[i] <- pow( sigma.y[i], -2 )
+  }
+  b0 ~ dunif( 0, 10 )
+  b1 ~ dunif( 0,  1 )
+} "
+writeLines( M1A.JAGS, con="M1A.JAGS.txt" )
+
+M1B.JAGS <- " model {
+  for (i in 1:n) {
+    y[i]      ~ dnorm( y.hat[i], tau.y[i] )
+    y.hat[i] <- b0 + b1 * t[i]
+    tau.y[i] <- pow( sigma.y[i], -2 )
+  }
+  b0 ~ dunif( 1, 2   )
+  b1 ~ dunif( 0, 0.5 )
+} "
+writeLines( M1B.JAGS, con="M1B.JAGS.txt" )
+
+M2A.JAGS <- " model {
+  for (i in 1:n) {
+    y[i]      ~ dnorm( y.hat[i], tau.y[i] )
+    y.hat[i] <- b0 + b1 * t[i] + b2 * t[i] * t[i]
+    tau.y[i] <- pow( sigma.y[i], -2 )
+  }
+  b0 ~ dunif( 0, 10   )
+  b1 ~ dunif( 0,  1   )
+  b2 ~ dunif( 0,  0.1 )
+} "
+writeLines( M2A.JAGS, con="M2A.JAGS.txt" )
+
+M2B.JAGS <- " model {
+  for (i in 1:n) {
+    y[i]      ~ dnorm( y.hat[i], tau.y[i] )
+    y.hat[i] <- b0 + b1 * t[i] + b2 * t[i] * t[i]
+    tau.y[i] <- pow( sigma.y[i], -2 )
+  }
+  b0 ~ dunif( 3    , 5    )
+  b1 ~ dunif( 0    , 0.5  )
+  b2 ~ dunif( 0.005, 0.01 )
+} "
+writeLines( M2B.JAGS, con="M2B.JAGS.txt" )
+```
+
+Settings common to all four MCMCs:
+
+```{r}
+t           <- data[,1]
+y           <- data[,2] ; ny <- length(y)
+sigma.y     <- data[,3]
+
+M.JAGS.data <- list ( n=ny, y=y, t=t, sigma.y=sigma.y )
+nadapt      <- 1.E4 ; nbi <- 1.E4 ; nit <- 1.E4
+```
+
+Settings common to both MCMCs for M1:
+
+```{r}
+M1.JAGS.params <- c( "b0", "b1" )
+```
+
+Settings common to both MCMCs for M2:
+
+```{r}
+M2.JAGS.params <- c( "b0", "b1", "b2" )
+```
+
+```{r MCMC for M1A}
+M1A.JAGS             <- jags.model( "M1A.JAGS.txt", data=M.JAGS.data,
+                                    n.chains=3, n.adapt=nadapt)
+update( M1A.JAGS, n.iter=nbi )
+M1A.JAGS.codaSamples <- coda.samples( M1A.JAGS,
+                                     var=M1.JAGS.params, n.iter=nit, thin=10 )
+M1A.dic              <- dic.samples  (M1A.JAGS, type="pD", n.iter=nit, thin=10 )
+
+M1A.JAGS.mcmcChain   <- as.matrix( M1A.JAGS.codaSamples )
+summary( M1A.JAGS.codaSamples )
+plot   ( M1A.JAGS.codaSamples )
+```
+
+Let's study the JAGS outputs, i.e. the MCMC, more closely.
+
+```{r Post-processing output from JAGS (M1A), fig.height=4, fig.cap="\\label{fig:Post_M1A}Post-processing output from JAGS (M1A)"}
+i.b0   <- which( colnames(M1A.JAGS.mcmcChain)=="b0"    )
+i.b1   <- which( colnames(M1A.JAGS.mcmcChain)=="b1"    )
+M1A.b0 <- M1A.JAGS.mcmcChain[ , i.b0 ]
+M1A.b1 <- M1A.JAGS.mcmcChain[ , i.b1 ]
+
+par( mfrow=c(1,2) )
+boxplot( M1A.b0, main="b0 (M1A)", col="cyan", ylim=c(0,10) )
+boxplot( M1A.b1, main="b1 (M1A)", col="cyan", ylim=c(0, 1) )
+```
+
+Now the other three MCMCs
+
+```{r MCMC for M1B}
+M1B.JAGS             <- jags.model( "M1B.JAGS.txt", data=M.JAGS.data,
+                                    n.chains=3, n.adapt=nadapt)
+update( M1B.JAGS, n.iter=nbi )
+M1B.JAGS.codaSamples <- coda.samples( M1B.JAGS,
+                                     var=M1.JAGS.params, n.iter=nit, thin=10 )
+M1B.dic              <- dic.samples  (M1B.JAGS, type="pD", n.iter=nit, thin=10 )
+M1B.JAGS.mcmcChain   <- as.matrix( M1B.JAGS.codaSamples )
+
+# summary( M1B.JAGS.codaSamples )
+# plot   ( M1B.JAGS.codaSamples )
+```
+
+```{r Post-processing output from JAGS (M1B), fig.height=4, fig.cap="\\label{fig:Post_M1B}Post-processing output from JAGS (M1B)"}
+i.b0   <- which( colnames(M1B.JAGS.mcmcChain)=="b0"    )
+i.b1   <- which( colnames(M1B.JAGS.mcmcChain)=="b1"    )
+M1B.b0 <- M1B.JAGS.mcmcChain[ , i.b0 ]
+M1B.b1 <- M1B.JAGS.mcmcChain[ , i.b1 ]
+```
+
+```{r MCMC for M2A}
+M2A.JAGS             <- jags.model( "M2A.JAGS.txt", data=M.JAGS.data,
+                                    n.chains=3, n.adapt=nadapt)
+update( M2A.JAGS, n.iter=nbi )
+M2A.JAGS.codaSamples <- coda.samples( M2A.JAGS,
+                                     var=M2.JAGS.params, n.iter=nit, thin=10 )
+M2A.dic              <- dic.samples  (M2A.JAGS, type="pD", n.iter=nit, thin=10 )
+M2A.JAGS.mcmcChain   <- as.matrix( M2A.JAGS.codaSamples )
+
+# summary( M2A.JAGS.codaSamples )
+# plot   ( M2A.JAGS.codaSamples )
+```
+
+```{r Post-processing output from JAGS (M2A), fig.height=4, fig.cap="\\label{fig:Post_M2A}Post-processing output from JAGS (M2A)"}
+i.b0   <- which( colnames(M2A.JAGS.mcmcChain)=="b0"    )
+i.b1   <- which( colnames(M2A.JAGS.mcmcChain)=="b1"    )
+i.b2   <- which( colnames(M2A.JAGS.mcmcChain)=="b2"    )
+M2A.b0 <- M2A.JAGS.mcmcChain[ , i.b0 ]
+M2A.b1 <- M2A.JAGS.mcmcChain[ , i.b1 ]
+M2A.b2 <- M2A.JAGS.mcmcChain[ , i.b2 ]
+```
+
+```{r MCMC for M2B}
+M2B.JAGS             <- jags.model( "M2B.JAGS.txt", data=M.JAGS.data,
+                                    n.chains=3, n.adapt=nadapt)
+update( M2B.JAGS, n.iter=nbi )
+M2B.JAGS.codaSamples <- coda.samples( M2B.JAGS,
+                                     var=M2.JAGS.params, n.iter=nit, thin=10 )
+M2B.dic              <- dic.samples  (M2B.JAGS, type="pD", n.iter=nit, thin=10 )
+M2B.JAGS.mcmcChain   <- as.matrix( M2B.JAGS.codaSamples )
+
+# summary( M2B.JAGS.codaSamples )
+# plot   ( M2B.JAGS.codaSamples )
+```
+
+```{r Post-processing output from JAGS (M2B), fig.height=4, fig.cap="\\label{fig:Post_M2B}Post-processing output from JAGS (M2B)"}
+i.b0   <- which( colnames(M2B.JAGS.mcmcChain)=="b0"    )
+i.b1   <- which( colnames(M2B.JAGS.mcmcChain)=="b1"    )
+i.b2   <- which( colnames(M2B.JAGS.mcmcChain)=="b2"    )
+M2B.b0 <- M2B.JAGS.mcmcChain[ , i.b0 ]
+M2B.b1 <- M2B.JAGS.mcmcChain[ , i.b1 ]
+M2B.b2 <- M2B.JAGS.mcmcChain[ , i.b2 ]
+```
+
+We compare the posterior parameter distributions for all four cases:
+
+```{r}
+par( mfrow=c(1,4) )
+boxplot( M1A.b0, main="b0 (M1A)", col="cyan", ylim=c(0,10) )
+boxplot( M1A.b1, main="b1 (M1A)", col="cyan", ylim=c(0, 1) )
+boxplot( M1B.b0, main="b0 (M1B)", col="cyan", ylim=c(0,10) )
+boxplot( M1B.b1, main="b1 (M1B)", col="cyan", ylim=c(0, 1) )
+
+par( mfrow=c(2,3) )
+boxplot( M2A.b0, main="b0 (M2A)", col="cyan", ylim=c(0,10  ) )
+boxplot( M2A.b1, main="b1 (M2A)", col="cyan", ylim=c(0, 1  ) )
+boxplot( M2A.b2, main="b2 (M2A)", col="cyan", ylim=c(0, 0.04) )
+boxplot( M2B.b0, main="b0 (M2B)", col="cyan", ylim=c(0,10  ) )
+boxplot( M2B.b1, main="b1 (M2B)", col="cyan", ylim=c(0, 1  ) )
+boxplot( M2B.b2, main="b2 (M2B)", col="cyan", ylim=c(0, 0.04) )
+```
+
+Finally we compare the DIC-values for all four cases:
+
+```{r}
+M1A.dic
+M1B.dic
+M2A.dic
+M2B.dic
+```
+
+We remind ourselves of the results from the Bayes' Factor approach, using the Integrated Likelihoods for the four 'models'.
+
+```{r}
+<<pMgivenD>>
+```
+
+
+EXERCISE: if we repeat all of the above with 10 times more precise data, how does that affect the model comparison?

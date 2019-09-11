@@ -3,7 +3,8 @@ title: "2D example using geoR to fit the emulator"
 author: "David Cameron"
 date: '`r Sys.Date()`'
 output:
-   pdf_document 
+   #pdf_document 
+   html_document 
 ---
 
 ```{r setoptions, echo=FALSE}
@@ -18,7 +19,7 @@ Since emulation in two dimensions in parameter space is essentially equivalent t
 physical space we'll use the same R package that was used before for geostatistics (geoR).
 
 Here we imagine that we have an expensive simulator that we want to emulate that has just two
-uncertain parameters p1 and p2.
+uncertain parameters p1 and p2. Equivalent to latitude and longitude in physical space. 
 
 Imagine that can only afford to make three runs of the simulator. We feed in our three samples of
 the two parameters (data_p1 and data_p2) as inputs to the simulator and make the runs.
@@ -41,7 +42,7 @@ data_values <- c( 0.7, 3.1, 2.2 )
 
 ## Mean function m(.)
 
-In this simple example for the prior we'll assume no trend ie that have no prior ideas about how the
+To keep things simple we'll assume no prior trend i.e. that have no prior ideas about how the
 simulator varies in x=(p1,p2).
 
 So our prior mean m(.) = single global mean value ($\beta$)
@@ -101,9 +102,9 @@ plot(seqphi_sparse, rep(1/length(seqphi_sparse), length(seqphi_sparse)), type = 
 lines(c(0, seqphi_sparse, 60), c(0, rep(1/length(seqphi_sparse), length(seqphi_sparse)), 0), type = "l")
 ```
 
-# Populating GeoR 
+# Populating geoR 
 
-Having decided on our priors we can now populate GeoR with our choices. 
+Having decided on our priors we can now populate geoR with our choices. 
 
 Note that we set tausq to zero as the emulator should interpolate the simulator at the model points.
 
